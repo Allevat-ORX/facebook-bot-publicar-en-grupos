@@ -1,0 +1,21 @@
+# Dependencias (se instalan con npm install)
+node_modules/
+
+# Sesión de Facebook (¡NUNCA subir esto — contiene tus cookies!)
+facebook-session/
+
+# Archivos de entorno y secretos
+.env
+.env.local
+secretos.txt
+
+# Log de ejecuciones (contiene historial personal)
+log.txt
+*.log
+
+# Imágenes (cada usuario usa las suyas)
+imagenes/
+
+# Archivos temporales del sistema operativo
+.DS_Store
+Thumbs.db
