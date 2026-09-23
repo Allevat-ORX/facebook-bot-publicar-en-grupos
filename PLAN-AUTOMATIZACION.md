@@ -60,9 +60,13 @@ Cada item de la cola puede ser de 3 tipos:
 - [x] Fallback MODO LISTA (grupos.js) si no hay `cola.json`
 - [ ] Captura del permalink real del post publicado (iteración futura)
 
-### D. Visor de aprobación (local)
-- [ ] Página HTML+JS local que lee `cola.json`, muestra copy+imagen por item, botones Aprobar/Rechazar
-- [ ] Sin infra (archivo local); futuro: integrar al panel del router
+### D. Visor de aprobación (local) — HECHO
+- [x] Página que lee `cola.json`, muestra copy+imagen/link por item, botones Aprobar/Rechazar/Pendiente
+- [x] Servidor local mínimo `visor.js` (solo módulos nativos de Node, SIN dependencias nuevas)
+- [x] Filtros por estado + validación visible + refresco automático (15s)
+- [x] Sirve creativos locales con protección anti path-traversal
+- [x] El visor solo aplica decisiones humanas (aprobado/rechazado/pendiente); `publicado`/`error` los pone el bot
+- Uso: `node visor.js` → http://localhost:4599
 
 ### E. Conexión Dify → cola (parte de AIS-424)
 - [ ] Script/endpoint para que Dify escriba items en la cola (con correlation_id, ownership — coherente con AIS-424)
