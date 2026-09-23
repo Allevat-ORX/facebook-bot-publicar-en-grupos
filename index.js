@@ -2,7 +2,15 @@ const { chromium } = require('playwright'); // Importa el navegador Chromium de 
 const fs = require('fs'); // Importa el módulo de sistema de archivos de Node.js para escribir el log.txt
 
 const grupos = require('./grupos'); // Importa la lista de grupos
-const texto = require('./texto');   // Importa el texto de la publicación
+const { obtenerTexto, variantes } = require('./texto'); // Importa las variantes de copy (rotación)
+
+// MODO ASISTIDO: si está activo, el bot PREPARA el post (pega el texto) pero
+// NO pulsa "Publicar" — deja el clic final al humano (reduce riesgo de baneo).
+// Activado por defecto; poner MODO_ASISTIDO=false para full-automático.
+const MODO_ASISTIDO = String(process.env.MODO_ASISTIDO ?? 'true').toLowerCase() !== 'false';
+
+// Límite de grupos por ejecución (tanda). Por defecto 5 para el arranque seguro.
+const LIMITE_TANDA = parseInt(process.env.LIMITE_TANDA || '5', 10);
 
 // Genera un número aleatorio entre min y max para simular comportamiento humano
 function esperaHumana(min, max) {
@@ -46,11 +54,11 @@ function guardarProgreso(ultimo) {
             return;
         }
 
-        // Toma los siguientes 10 grupos desde donde quedó
-        const hasta = Math.min(desde + 10, grupos.length); // Math.min evita pasarse del total
+        // Toma los siguientes N grupos desde donde quedó (LIMITE_TANDA, 5 por defecto)
+        const hasta = Math.min(desde + LIMITE_TANDA, grupos.length); // Math.min evita pasarse del total
         const gruposHoy = grupos.slice(desde, hasta); // Extrae la tanda de hoy
 
-        log(`Publicando en grupos ${desde + 1} al ${hasta} de ${grupos.length}`);
+        log(`Publicando en grupos ${desde + 1} al ${hasta} de ${grupos.length} | MODO: ${MODO_ASISTIDO ? 'ASISTIDO (clic humano)' : 'AUTOMATICO'}`);
 
         // Abre el navegador usando un perfil persistente
         // Esto guarda la sesión de Facebook en la carpeta ./facebook-session
@@ -67,11 +75,13 @@ function guardarProgreso(ultimo) {
         log('Nueva página creada');
 
         // Recorre cada grupo de la tanda de hoy
-        for (const grupo of gruposHoy) {
+        for (const [indiceGrupo, grupo] of gruposHoy.entries()) {
 
             try {
 
-                log(`Publicando en: ${grupo}`);
+                // Rota la variante de copy por grupo (para no repetir texto idéntico)
+                const texto = obtenerTexto(desde + indiceGrupo);
+                log(`Publicando en: ${grupo}  (variante de copy #${((desde + indiceGrupo) % variantes.length) + 1})`);
 
                 // Navega al grupo
                 await page.goto(grupo);
@@ -111,12 +121,24 @@ function guardarProgreso(ultimo) {
                 // Espera entre 5 y 12 segundos para que Facebook procese y muestre el preview de la imagen
                 await page.waitForTimeout(esperaHumana(5000, 12000));
 
-                // Hace click en el botón Publicar para enviar la publicación
-                await page.getByRole('button', { name: 'Publicar' }).click();
-                log(`Publicación enviada en ${grupo} ✅`);
-
-                // Espera entre grupos para no levantar sospechas en Facebook
-                await page.waitForTimeout(esperaHumana(10000, 20000));
+                if (MODO_ASISTIDO) {
+                    // MODO ASISTIDO: NO se pulsa "Publicar". El post queda preparado
+                    // en pantalla y el HUMANO da el clic final (reduce riesgo de baneo).
+                    log(`⏸️  POST PREPARADO en ${grupo} — REVISA y pulsa "Publicar" tú mismo.`, 'INFO');
+                    log('   Cuando publiques (o decidas saltar), vuelve a la terminal y pulsa ENTER para continuar al siguiente grupo.');
+                    // Espera a que el humano confirme por consola antes de seguir
+                    await new Promise((resolve) => {
+                        process.stdin.resume();
+                        process.stdin.once('data', () => { process.stdin.pause(); resolve(); });
+                    });
+                    log(`Continuando tras revisión humana de ${grupo}`);
+                } else {
+                    // MODO AUTOMATICO: pulsa "Publicar" directamente
+                    await page.getByRole('button', { name: 'Publicar' }).click();
+                    log(`Publicación enviada en ${grupo} ✅`);
+                    // Espera entre grupos para no levantar sospechas en Facebook
+                    await page.waitForTimeout(esperaHumana(10000, 20000));
+                }
 
             } catch (error) {
                 log(`Error en ${grupo}: ${error.message}`, 'ERROR');
