@@ -2,7 +2,7 @@ const { chromium } = require('playwright'); // Importa el navegador Chromium de 
 const fs = require('fs'); // Importa el módulo de sistema de archivos de Node.js para escribir el log.txt
 
 const grupos = require('./grupos'); // Importa la lista de grupos
-const { obtenerTexto, variantes } = require('./texto'); // Importa las variantes de copy (rotación)
+const { obtenerTextoAleatorio, variantes } = require('./texto'); // Variantes de copy (selección ALEATORIA anti-repetición)
 
 // MODO ASISTIDO: si está activo, el bot PREPARA el post (pega el texto) pero
 // NO pulsa "Publicar" — deja el clic final al humano (reduce riesgo de baneo).
@@ -79,9 +79,10 @@ function guardarProgreso(ultimo) {
 
             try {
 
-                // Rota la variante de copy por grupo (para no repetir texto idéntico)
-                const texto = obtenerTexto(desde + indiceGrupo);
-                log(`Publicando en: ${grupo}  (variante de copy #${((desde + indiceGrupo) % variantes.length) + 1})`);
+                // Elige una variante de copy AL AZAR (FB suspende si detecta texto idéntico
+                // repetido; la selección aleatoria es menos predecible que la secuencial).
+                const { texto, numero } = obtenerTextoAleatorio();
+                log(`Publicando en: ${grupo}  (variante de copy #${numero} de ${variantes.length}, al azar)`);
 
                 // Navega al grupo
                 await page.goto(grupo);

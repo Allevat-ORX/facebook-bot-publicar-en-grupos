@@ -49,10 +49,21 @@ Dinos qué equipo y en qué zona: https://www.facebook.com/OnRentX/`,
 ];
 
 // Devuelve una variante rotando por índice (para que cada grupo reciba una distinta).
+// Se mantiene por compatibilidad, pero para publicar se recomienda la versión ALEATORIA
+// (ver obtenerTextoAleatorio): el autor del método advierte que Facebook suspende cuando
+// detecta texto idéntico repetido, y la rotación secuencial es predecible.
 function obtenerTexto(indice = 0) {
   return variantes[indice % variantes.length];
 }
 
-module.exports = { variantes, obtenerTexto };
+// Devuelve una variante ELEGIDA AL AZAR. Es la forma recomendada de publicar:
+// romper la secuencia reduce el riesgo de shadowban por texto repetido/predecible.
+// Devuelve también el índice (1-based) para poder registrarlo en el log.
+function obtenerTextoAleatorio() {
+  const indice = Math.floor(Math.random() * variantes.length);
+  return { texto: variantes[indice], numero: indice + 1 };
+}
+
+module.exports = { variantes, obtenerTexto, obtenerTextoAleatorio };
 // Compatibilidad: si algo importa el módulo como string, usa la primera variante.
 module.exports.texto = variantes[0];
