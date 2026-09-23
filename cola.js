@@ -133,6 +133,51 @@ function marcarItem(data, id, estado, extra = {}) {
   return item;
 }
 
+// Genera un id de item legible y único: orx-YYYY-MM-DD-XXXX (secuencia por fecha).
+function generarId(data) {
+  const fecha = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const prefijo = `orx-${fecha}-`;
+  const delDia = data.items.filter((it) => typeof it.id === 'string' && it.id.startsWith(prefijo));
+  const seq = String(delDia.length + 1).padStart(4, '0');
+  return `${prefijo}${seq}`;
+}
+
+// Encola un nuevo item (entrada desde Dify / AIS-424). Normaliza, valida y persiste.
+// entrada: { grupo, tipo, copies[], imagen?, link_marketplace?, correlation_id?, owner?, id?, estado? }
+// - estado inicial por defecto: "pendiente" (el humano aprueba en el visor).
+// Devuelve el item creado. Lanza si la entrada no es válida.
+function encolarItem(entrada = {}) {
+  const data = existeCola() ? leerCola() : { version: 1, items: [] };
+
+  const item = {
+    id: entrada.id || generarId(data),
+    correlation_id: entrada.correlation_id || null,
+    owner: entrada.owner || 'onrentx-marketing',
+    grupo: entrada.grupo,
+    tipo: entrada.tipo,
+    copies: Array.isArray(entrada.copies) ? entrada.copies : (entrada.copy ? [entrada.copy] : []),
+    imagen: entrada.imagen || null,
+    link_marketplace: entrada.link_marketplace || null,
+    estado: entrada.estado || 'pendiente',
+    permalink: null,
+    log: [`[${new Date().toISOString()}] encolado (owner=${entrada.owner || 'onrentx-marketing'}${entrada.correlation_id ? `, corr=${entrada.correlation_id}` : ''})`],
+  };
+
+  // No permitir ids duplicados.
+  if (data.items.some((it) => it.id === item.id)) {
+    throw new Error(`encolarItem: ya existe un item con id "${item.id}"`);
+  }
+
+  const val = validarItem(item, data.items.length);
+  if (!val.ok) {
+    throw new Error('encolarItem: item inválido: ' + val.errores.join('; '));
+  }
+
+  data.items.push(item);
+  guardarCola(data);
+  return item;
+}
+
 module.exports = {
   RUTA_COLA,
   TIPOS_VALIDOS,
@@ -145,4 +190,6 @@ module.exports = {
   elegirCopy,
   guardarCola,
   marcarItem,
+  generarId,
+  encolarItem,
 };

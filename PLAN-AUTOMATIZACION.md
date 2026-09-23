@@ -68,9 +68,12 @@ Cada item de la cola puede ser de 3 tipos:
 - [x] El visor solo aplica decisiones humanas (aprobado/rechazado/pendiente); `publicado`/`error` los pone el bot
 - Uso: `node visor.js` → http://localhost:4599
 
-### E. Conexión Dify → cola (parte de AIS-424)
-- [ ] Script/endpoint para que Dify escriba items en la cola (con correlation_id, ownership — coherente con AIS-424)
-- [ ] Documentar el contrato para el equipo que implemente AIS-424
+### E. Conexión Dify → cola (parte de AIS-424) — HECHO
+- [x] Script/endpoint para que Dify escriba items en la cola (con `correlation_id`, `owner`)
+- [x] `dify-a-cola.js`: CLI (arg o stdin) y módulo (`encolarDesdeDify`) → escribe directo en `cola.json`
+- [x] Endpoint HTTP `POST /api/enqueue` en `visor.js` (Dify hace POST con el contrato)
+- [x] `cola.encolarItem()`: id autogenerado `orx-YYYY-MM-DD-XXXX`, estado inicial `pendiente`, valida antes de persistir
+- [x] Documentado el contrato de entrada para el equipo que implemente AIS-424
 
 ## 5. Operación y límites (anti-baneo)
 
@@ -97,5 +100,22 @@ Cada item de la cola puede ser de 3 tipos:
 
 ## 8. Estado del proyecto para handoff
 
-Repo listo, dependencias instaladas, Chromium headful OK. Lo pendiente son las tareas B–E + prueba real.
-Cualquier agente que retome: leer este archivo + AIS-401 + AIS-424 + AIS-400. Todo el contexto está en Jira, no en memoria de sesión.
+Repo listo, dependencias instaladas, Chromium headful OK.
+
+**Hecho en código (rama `feat/onrentx-modo-asistido`):**
+- A (AIS-434): rotación aleatoria de copy · `texto.js` + `index.js`
+- B (AIS-435): soporte imagen local + tipo link (mosaico FB) · `index.js` `publicarPost()`
+- C (AIS-436): contrato `cola.json` + MODO COLA · `cola.js` + `cola.ejemplo.json` + `index.js`
+- D (AIS-437): visor de aprobación local · `visor.js` (http://localhost:4599)
+- E (AIS-438): conexión Dify→cola · `dify-a-cola.js` (CLI/módulo) + `POST /api/enqueue`
+
+**Flujo completo:** Dify encola (`dify-a-cola.js` / `/api/enqueue`, estado `pendiente`) →
+humano aprueba en el visor (`node visor.js`) → bot publica los `aprobado`
+(`MODO_ASISTIDO=true node index.js`, clic final humano) → marca `publicado`.
+
+**Pendiente (requiere login de Aleix o iteración futura):**
+- Prueba real end-to-end con la cuenta de Aleix (login + clic final humano).
+- Captura del `permalink` real del post publicado (hoy queda `null`).
+
+Cualquier agente que retome: leer este archivo + AIS-401 + AIS-424 + AIS-400.
+Todo el contexto está en Jira y en este repo, no en memoria de sesión.

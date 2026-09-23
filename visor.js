@@ -82,6 +82,22 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ---- POST /api/enqueue : Dify -> cola (AIS-438) ----
+    // Body JSON: { grupo, tipo, copies[]|copy, imagen?, link_marketplace?, correlation_id?, owner?, estado? }
+    // Crea un item (estado inicial "pendiente" salvo que se indique) y persiste.
+    if (req.method === 'POST' && url.pathname === '/api/enqueue') {
+      const body = await leerBody(req);
+      let entrada;
+      try { entrada = JSON.parse(body); } catch { enviarJSON(res, 400, { error: 'body JSON inválido' }); return; }
+      try {
+        const item = cola.encolarItem(entrada);
+        enviarJSON(res, 201, { ok: true, item });
+      } catch (e) {
+        enviarJSON(res, 400, { error: e.message });
+      }
+      return;
+    }
+
     // ---- POST /api/item/:id : cambiar estado (aprobar/rechazar/pendiente) ----
     if (req.method === 'POST' && url.pathname.startsWith('/api/item/')) {
       if (!cola.existeCola()) { enviarJSON(res, 404, { error: 'no existe cola.json' }); return; }
