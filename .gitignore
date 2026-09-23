@@ -15,6 +15,10 @@ log.txt
 
 # Imágenes (cada usuario usa las suyas)
 imagenes/
+creativos/
+
+# Cola de publicación REAL (contenido operativo de campañas; solo se versiona cola.ejemplo.json)
+cola.json
 
 # Archivos temporales del sistema operativo
 .DS_Store

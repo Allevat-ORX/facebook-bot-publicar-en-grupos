@@ -46,15 +46,19 @@ Cada item de la cola puede ser de 3 tipos:
 - [ ] **Cambiar rotación secuencial → ALEATORIA** (recomendación del autor: FB checa texto repetido)
 - [ ] Prueba real con login de Aleix (pendiente, requiere sus credenciales)
 
-### B. Soporte media (imagen + link Marketplace)
-- [ ] Adjuntar imagen local al post (subir archivo desde `creativos/`)
-- [ ] Soportar `tipo:"link"` → pegar URL Marketplace y dejar que FB genere el mosaico
-- [ ] Imagen generada por **AIS-400 (Bedrock en Dify)**, el bot solo la consume
+### B. Soporte media (imagen + link Marketplace) — PARCIAL (adelantado con C)
+- [x] Adjuntar imagen local al post (subir archivo desde `creativos/`) → `publicarPost()` usa `input[type=file]`
+- [x] Soportar `tipo:"link"` → el copy incluye la URL Marketplace y FB genera el mosaico
+- [x] Imagen generada por **AIS-400 (Bedrock en Dify)**, el bot solo la consume (ruta en `cola.json`)
+- [ ] Prueba real de adjuntado de imagen y de mosaico de link (requiere login de Aleix)
 
-### C. Cola de aprobación + contrato (parte de AIS-424)
-- [ ] Definir esquema `cola.json` (contrato Dify ↔ bot ↔ router)
-- [ ] Adaptar `index.js` para leer la cola (solo publica `estado:"aprobado"`)
-- [ ] Marcar `estado:"publicado"` + `permalink` tras publicar
+### C. Cola de aprobación + contrato (parte de AIS-424) — HECHO (código)
+- [x] Definir esquema `cola.json` (contrato Dify ↔ bot ↔ router) → `cola.js` + `cola.ejemplo.json`
+- [x] Adaptar `index.js` para leer la cola (solo publica `estado:"aprobado"`) → MODO COLA
+- [x] Marcar `estado:"publicado"` + `permalink` tras publicar (permalink: captura real pendiente)
+- [x] Validación del contrato (tipos, coherencia por tipo, existencia de imagen en disco)
+- [x] Fallback MODO LISTA (grupos.js) si no hay `cola.json`
+- [ ] Captura del permalink real del post publicado (iteración futura)
 
 ### D. Visor de aprobación (local)
 - [ ] Página HTML+JS local que lee `cola.json`, muestra copy+imagen por item, botones Aprobar/Rechazar
