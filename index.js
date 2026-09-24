@@ -63,58 +63,115 @@ async function publicarPost(page, grupo, texto, opciones = {}) {
 
     // Simula scroll humano con una distancia aleatoria entre 300 y 900 píxeles
     await page.mouse.wheel(0, esperaHumana(300, 900));
+    await page.waitForTimeout(esperaHumana(1500, 3000));
 
-    // Hace click en el campo "Escribe algo" para abrir el modal de nueva publicación
-    await page.getByText('Escribe algo').click();
-    log('Modal de publicación abierto');
+    // Abre el modal de nueva publicación. Multi-idioma: la cuenta puede estar en
+    // catalán, español o inglés, así que probamos varios textos de la caja.
+    const textosCaja = [
+        'Escriu alguna cosa', 'Escribe algo', 'Escribe algo...',
+        '¿Qué estás pensando', 'Què estàs pensant', 'Write something', 'Crea una publicación',
+    ];
+    let modalAbierto = false;
+    for (const t of textosCaja) {
+        try {
+            const el = page.getByText(t, { exact: false }).first();
+            if (await el.isVisible({ timeout: 2500 }).catch(() => false)) {
+                await el.click();
+                log(`Modal de publicación abierto (caja: "${t}")`);
+                modalAbierto = true;
+                break;
+            }
+        } catch (_) {}
+    }
+    if (!modalAbierto) {
+        throw new Error('No se encontró la caja de publicar (revisa idioma o si la cuenta puede publicar en el grupo)');
+    }
 
-    // Espera entre 5 y 9 segundos para que el modal cargue completamente
+    // Espera a que el modal cargue del todo
     await page.waitForTimeout(esperaHumana(5000, 9000));
 
-    // Busca la caja de texto editable dentro del modal
-    // .last() porque Facebook tiene varios textbox en el DOM y el del modal es el último
-    const editor = page.locator('[role="textbox"]').last();
-    await editor.click(); // foco antes de escribir
-
-    // Copia el texto al portapapeles y lo pega de golpe
-    // Más confiable que type() especialmente con emojis y textos largos.
-    // Para tipo "link", el copy YA incluye la URL de Marketplace: FB genera
-    // el mosaico de fotos automático a partir de esa URL (truco del método).
-    await page.evaluate((t) => navigator.clipboard.writeText(t), texto);
-    await page.keyboard.press('Control+V');
-    log('Texto pegado');
-
-    // Si el item trae imagen local, la adjunta por el input de tipo file del modal.
+    // ORDEN CORRECTO: primero IMAGEN (si hay), luego TEXTO. Adjuntar la imagen
+    // DESPUÉS del texto hace que FB reorganice el modal y el texto se pierda o
+    // se separe en otra publicación. Con la imagen ya cargada, el editor es estable.
     if (imagen) {
         const rutaImg = path.isAbsolute(imagen) ? imagen : path.join(__dirname, imagen);
         try {
             const inputFile = page.locator('input[type="file"]').last();
             await inputFile.setInputFiles(rutaImg);
             log(`Imagen adjuntada: ${imagen}`);
-            // Da tiempo a que FB suba y previsualice la imagen
-            await page.waitForTimeout(esperaHumana(6000, 12000));
+            await page.waitForTimeout(esperaHumana(7000, 12000)); // subida + preview
         } catch (e) {
             log(`No se pudo adjuntar la imagen "${imagen}": ${e.message}`, 'ERROR');
         }
     }
 
-    // Espera para que Facebook genere la previsualización del enlace/imagen
-    await page.waitForTimeout(3000);
-    log('Previsualización generada');
-    await page.waitForTimeout(esperaHumana(5000, 12000));
+    // Pegar el texto en el EDITOR DEL POST (no en una caja de comentarios).
+    // Se enfoca por JS con su aria-placeholder porque, tras cargar la imagen, FB
+    // superpone un overlay que intercepta los clicks normales de Playwright.
+    const enfocado = await page.evaluate(() => {
+        const cands = Array.from(document.querySelectorAll('[contenteditable="true"][role="textbox"]'));
+        const ed = cands.find((el) => {
+            const ap = (el.getAttribute('aria-placeholder') || '').toLowerCase();
+            return /post|publicaci|cosa|pensant|thinking/.test(ap);
+        });
+        if (!ed) return false;
+        ed.focus();
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(ed);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return true;
+    });
+    if (!enfocado) {
+        throw new Error('No se encontró el editor del post para pegar el texto');
+    }
+
+    await page.waitForTimeout(600);
+    await page.evaluate((t) => navigator.clipboard.writeText(t), texto).catch(() => {});
+    await page.keyboard.press('Control+V');
+    await page.waitForTimeout(1500);
+
+    // Verifica que el copy entró en el editor del post
+    const textoOk = await page.evaluate(() => {
+        const cands = Array.from(document.querySelectorAll('[contenteditable="true"][role="textbox"]'));
+        const ed = cands.find((el) => /post|publicaci|cosa|pensant|thinking/.test((el.getAttribute('aria-placeholder') || '').toLowerCase()));
+        return ed ? (ed.innerText || '').trim().length : 0;
+    });
+    if (textoOk > 20) {
+        log(`Texto pegado (${textoOk} caracteres en el editor del post)`);
+    } else {
+        log('⚠️ El editor del post parece vacío tras pegar; revisa antes de publicar', 'ERROR');
+    }
+
+    // Espera final para que FB termine de generar la previsualización
+    await page.waitForTimeout(esperaHumana(3000, 6000));
 
     if (MODO_ASISTIDO) {
-        // MODO ASISTIDO: NO se pulsa "Publicar". El post queda preparado
-        // en pantalla y el HUMANO da el clic final (reduce riesgo de baneo).
-        log(`⏸️  POST PREPARADO en ${grupo} — REVISA y pulsa "Publicar" tú mismo.`);
+        // MODO ASISTIDO: NO se pulsa "Publicar". El post (imagen + texto en UNA sola
+        // publicación) queda preparado y el HUMANO da el clic final.
+        log(`⏸️  POST PREPARADO en ${grupo} (imagen + texto en un solo post) — REVISA y pulsa "Publicar" tú mismo.`);
         log('   Cuando publiques (o decidas saltar), vuelve a la terminal y pulsa ENTER para continuar.');
         await esperarHumanoEnter();
         log(`Continuando tras revisión humana de ${grupo}`);
         return { publicado: true, permalink: null };
     }
 
-    // MODO AUTOMATICO: pulsa "Publicar" directamente
-    await page.getByRole('button', { name: 'Publicar' }).click();
+    // MODO AUTOMATICO: pulsa "Publicar"/"Publica" (multi-idioma).
+    const botonesPublicar = ['Publicar', 'Publica', 'Post'];
+    let publicado = false;
+    for (const b of botonesPublicar) {
+        try {
+            const btn = page.getByRole('button', { name: b, exact: true }).first();
+            if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
+                await btn.click();
+                publicado = true;
+                break;
+            }
+        } catch (_) {}
+    }
+    if (!publicado) throw new Error('No se encontró el botón Publicar/Publica');
     log(`Publicación enviada en ${grupo} ✅`);
     await page.waitForTimeout(esperaHumana(10000, 20000));
     return { publicado: true, permalink: null };
@@ -228,18 +285,30 @@ async function ejecutarModoLista(page) {
 // ------------------------------------------------------------
 (async () => {
     log('Bot iniciado');
-    let context, page;
+    let context, page, browserCDP;
+    const CDP_URL = process.env.CDP_URL; // ej. http://[::1]:9222 para reusar un navegador ya abierto/logueado
 
     try {
-        // Abre el navegador con perfil persistente (sesión FB en ./facebook-session).
-        context = await chromium.launchPersistentContext('./facebook-session', {
-            headless: false, // false = muestra el navegador; true = segundo plano
-            args: ['--start-maximized'],
-            viewport: null
-        });
-        log('Navegador abierto');
-        page = await context.newPage();
-        log('Nueva página creada');
+        if (CDP_URL) {
+            // MODO CDP: se conecta a un navegador YA abierto (con la sesión de OnRentX).
+            // No lanza ni cierra el navegador; solo lo controla.
+            log(`Conectando por CDP a ${CDP_URL} (reusa sesión abierta)`);
+            browserCDP = await chromium.connectOverCDP(CDP_URL);
+            context = browserCDP.contexts()[0];
+            const paginas = context.pages();
+            page = paginas.find((p) => p.url().includes('facebook')) || paginas[0] || await context.newPage();
+            log('Conectado al navegador existente');
+        } else {
+            // Abre el navegador con perfil persistente (sesión FB en ./facebook-session).
+            context = await chromium.launchPersistentContext('./facebook-session', {
+                headless: false, // false = muestra el navegador; true = segundo plano
+                args: ['--start-maximized'],
+                viewport: null
+            });
+            log('Navegador abierto');
+            page = await context.newPage();
+            log('Nueva página creada');
+        }
 
         // Si existe cola.json → MODO COLA (Dify/router). Si no → MODO LISTA (grupos.js).
         if (cola.existeCola()) {
@@ -253,7 +322,11 @@ async function ejecutarModoLista(page) {
         log(`Error general: ${error.message}`, 'ERROR');
         log(`Stack: ${error.stack}`, 'ERROR');
     } finally {
-        if (context) {
+        if (browserCDP) {
+            // En modo CDP solo desconectamos; NO cerramos el navegador de Aleix.
+            await browserCDP.close();
+            log('Desconectado del navegador (CDP) — la ventana sigue abierta');
+        } else if (context) {
             await context.close();
             log('Navegador cerrado');
         }
