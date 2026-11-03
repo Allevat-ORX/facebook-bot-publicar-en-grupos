@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  onrentx-captacion-worker:
+    build: .
+    container_name: onrentx-captacion-worker
+    restart: unless-stopped
+    ports:
+      - "4599:4599"
+    environment:
+      - PORT=4599
+      - HEADLESS=true
+      - MODO_ASISTIDO=false
+      - LIMITE_TANDA=5
+      - FB_SESSION_DIR=/app/facebook-session
+    volumes:
+      - ./facebook-session:/app/facebook-session
+      - ./cola.json:/app/cola.json
+      - ./log.txt:/app/log.txt
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4599/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
