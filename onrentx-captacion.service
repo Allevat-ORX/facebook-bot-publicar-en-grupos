@@ -1,0 +1,23 @@
+[Unit]
+Description=OnRentX Captacion y Sondeo Facebook Groups Worker (O2BF-1526)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/onrentx/facebook-bot-publicar-en-grupos
+ExecStart=/usr/bin/node servidor_captacion.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=PORT=4599
+Environment=HEADLESS=true
+Environment=MODO_ASISTIDO=false
+Environment=LIMITE_TANDA=5
+Environment=FB_SESSION_DIR=/opt/onrentx/facebook-bot-publicar-en-grupos/facebook-session
+
+# Resource Limits
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

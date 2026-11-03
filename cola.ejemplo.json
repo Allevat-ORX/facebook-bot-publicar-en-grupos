@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "orx-2026-09-23-0001",
+      "correlation_id": "dify-run-abc123",
+      "owner": "onrentx-marketing",
+      "grupo": "https://www.facebook.com/groups/123456789",
+      "tipo": "texto",
+      "copies": [
+        "¿Tienes la obra parada por falta de maquinaria? En OnRentX te conectamos con proveedores de renta. Escríbenos: https://www.facebook.com/OnRentX/",
+        "Maquinaria para tu obra, sin complicarte. OnRentX te ayuda a encontrar y rentar el equipo que necesitas. https://www.facebook.com/OnRentX/"
+      ],
+      "imagen": null,
+      "link_marketplace": null,
+      "estado": "aprobado",
+      "permalink": null,
+      "log": []
+    },
+    {
+      "id": "orx-2026-09-23-0002",
+      "correlation_id": "dify-run-abc124",
+      "owner": "onrentx-marketing",
+      "grupo": "https://www.facebook.com/groups/987654321",
+      "tipo": "imagen",
+      "copies": [
+        "Excavadora disponible para renta en tu zona. Cuéntanos tu proyecto en OnRentX: https://www.facebook.com/OnRentX/"
+      ],
+      "imagen": "creativos/EJEMPLO-pon-aqui-la-ruta.jpg",
+      "link_marketplace": null,
+      "estado": "pendiente",
+      "_nota": "tipo imagen: la ruta debe existir en disco al validar. Aquí es un placeholder; Dify/AIS-400 la rellena con el creativo real.",
+      "permalink": null,
+      "log": []
+    },
+    {
+      "id": "orx-2026-09-23-0003",
+      "correlation_id": "dify-run-abc125",
+      "owner": "onrentx-marketing",
+      "grupo": "https://www.facebook.com/groups/555555555",
+      "tipo": "link",
+      "copies": [
+        "Retroexcavadora en renta — publicada en Marketplace. Ver detalles y contactar 👇"
+      ],
+      "imagen": null,
+      "link_marketplace": "https://www.facebook.com/marketplace/item/1122334455",
+      "estado": "rechazado",
+      "permalink": null,
+      "log": []
+    }
+  ]
+}
