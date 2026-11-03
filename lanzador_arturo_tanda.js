@@ -16,7 +16,7 @@ function esperaHumana(min, max) {
 
   const sessionPath = path.resolve(__dirname, 'sessions/session-aleix');
   const context = await chromium.launchPersistentContext(sessionPath, {
-    headless: false,
+    headless: process.env.HEADLESS === 'false' ? false : true,
     viewport: { width: 1366, height: 768 },
     args: ['--disable-notifications', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
   });
