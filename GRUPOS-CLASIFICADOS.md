@@ -75,8 +75,24 @@ Resumen: 106 total | 46 SLP | 2 QRO | 58 otras/sin-ciudad | 66 con maquinaria | 
 - [otro 🚜] Venta - Renta de Maquinaria — https://www.facebook.com/groups/rentademaquinaria/
 - [otro 🚜] Renta de maquinaria — https://www.facebook.com/groups/123167398323588/
 
-## EMPLEO/bolsa de trabajo (24) — captación operadores/vacantes (NO renta)
+## EMPLEO / RECLUTAMIENTO ONRENTX — AISLAMIENTO ESTRICTO (NO campañas comerciales)
+> ⚠️ **REGLA DE AISLAMIENTO:** Estos grupos son EXCLUSIVOS para captación de talento, becarios JCF, técnicos y vacantes laborales. NUNCA publicar ofertas comerciales/renta de maquinaria en estos grupos, ni publicar ofertas de empleo en los grupos de maquinaria/clientes.
+
+### A. Jóvenes Construyendo el Futuro (JCF) — Mapeo Estratégico (SLP & Vinculación)
+- [SLP 🎓] Jóvenes Construyendo El Futuro San Luis Potosí — https://www.facebook.com/groups/394793131358732/
+- [SLP 🎓] Jóvenes Construyendo el Futuro (General MX/SLP) — https://www.facebook.com/groups/2593953620779234/
+- [SLP 🎓] Jóvenes Construyendo el Futuro Comunidad — https://www.facebook.com/groups/812146173159312/
+- [SLP 🎓] JCF Vinculación y Centros de Trabajo — https://www.facebook.com/groups/302617120386236/
+
+### B. Universitarios, Egresados & Prácticas (SLP Capital)
+- [SLP 🎓] Ofertas de Bolsa de Trabajo - FEN - UASLP — https://www.facebook.com/groups/BolsaTrabajoFEN/
+- [SLP 🎓] Prácticas Profesionales San Luis Potosí SLP — https://www.facebook.com/groups/practicasprofesionales.slp/
+
+### C. Técnicos, Operativos & Oficios (SLP)
+- [SLP 💼] Bolsa de Trabajo Operadores y Técnicos San Luis Potosí oficial — https://www.facebook.com/groups/1330568484227488/
 - [SLP 💼] Trabajos de albañilería SAN LUIS POTOSI, MX — https://www.facebook.com/groups/2074147809770276/
+
+### D. Bolsa de Trabajo y Empleo General (SLP)
 - [SLP 💼] BOLSA DE TRABAJO EN SAN LUIS POTOSI — https://www.facebook.com/groups/bolsadetrabajosanlp/
 - [SLP 💼] bolsa de trabajo San Luis Potosi — https://www.facebook.com/groups/466638983694567/
 - [SLP 💼] Busco Empleo San Luis Potosí — https://www.facebook.com/groups/452300738521861/
@@ -85,7 +101,6 @@ Resumen: 106 total | 46 SLP | 2 QRO | 58 otras/sin-ciudad | 66 con maquinaria | 
 - [SLP 💼] BOLSA DE TRABAJO URGENTE EN SAN LUIS POTOSI — https://www.facebook.com/groups/696919217182066/
 - [SLP 💼] EMPLEOS SAN LUIS POTOSÍ — https://www.facebook.com/groups/583309198370639/
 - [SLP 💼] Ofertas De Empleo San Luis Potosi — https://www.facebook.com/groups/1567896836766703/
-- [SLP 💼] Bolsa de trabajo en San Luis Potosí ZONA INDUSTRIAL — https://www.facebook.com/groups/1744024295823857/
 - [SLP 💼] Bolsa de Trabajo San Luis Potosí — https://www.facebook.com/groups/915248585290203/
 - [SLP 💼] BOLSA DE TRABAJO SAN LUIS POTOSÍ — https://www.facebook.com/groups/137126770237976/
 - [SLP 💼] EMPLEOS EN SAN LUIS POTOSI — https://www.facebook.com/groups/1194929897190129/
@@ -97,9 +112,14 @@ Resumen: 106 total | 46 SLP | 2 QRO | 58 otras/sin-ciudad | 66 con maquinaria | 
 - [SLP 💼] Bolsa De Trabajo En San Luis Potosi — https://www.facebook.com/groups/825239051003414/
 - [SLP 💼] Empleos en San Luis Potosi — https://www.facebook.com/groups/710958677344075/
 - [SLP 💼] Empleo San Luis Potosí 2025 — https://www.facebook.com/groups/luis.rh.empleo.slp/
+- [SLP 💼] Bolsa de Empleo San Luis Potosí — https://www.facebook.com/groups/815331263778077/
+- [SLP 💼] Empleos y Vacantes San Luis Potosí (Club Empleos) — https://www.facebook.com/groups/empleosensanluispotosi.slp/
+- [SLP 💼] Empleos - Bolsa de Trabajo en San Luis Potosí 2026 — https://www.facebook.com/groups/914266091435031/
+- [SLP 💼] Bolsa de Empleo S.L.P. — https://www.facebook.com/groups/1430894408053394/
+- [SLP 💼] BOLSA DE TRABAJO SLP 2025-2026 — https://www.facebook.com/groups/854049246454774/
+- [SLP 💼] Bolsa de Trabajo SLP Vacantes Administrativas — https://www.facebook.com/groups/413117362386778/
+- [SLP 💼] Vacantes Administrativas SLP — https://www.facebook.com/groups/202277657760417/
 - [otro 💼] Trabajos para programadores y desarrolladores — https://www.facebook.com/groups/808991849115782/
-- [SLP 💼] Bolsa de Trabajo Operadores y Técnicos San Luis Potosí oficial — https://www.facebook.com/groups/1330568484227488/
-- [otro 🚜 💼] Venta-renta, oportunidades de trabajo de maquinaria pesada en México — https://www.facebook.com/groups/975002112590215/
 
 ## Resto / sin foco claro (17)
 - [SLP] contratistas y servicios en san Luis Potosí — https://www.facebook.com/groups/1020158966498575/

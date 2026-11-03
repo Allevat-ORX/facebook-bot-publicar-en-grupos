@@ -21,13 +21,6 @@
     "empleo": false
   },
   {
-    "url": "https://www.facebook.com/groups/2074147809770276/",
-    "nombre": "Trabajos de albañilería SAN LUIS POTOSI, MX",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
     "url": "https://www.facebook.com/groups/3562948940649623/",
     "nombre": "Construccion, contratistas, en Tulum",
     "ciudad": "otro",
@@ -39,13 +32,6 @@
     "nombre": "Renta y Venta de Maquinaria Cancun",
     "ciudad": "otro",
     "maquinaria": true,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/1020158966498575/",
-    "nombre": "contratistas y servicios en san Luis Potosí",
-    "ciudad": "SLP",
-    "maquinaria": false,
     "empleo": false
   },
   {
@@ -63,20 +49,6 @@
     "empleo": false
   },
   {
-    "url": "https://www.facebook.com/groups/bolsadetrabajosanlp/",
-    "nombre": "BOLSA DE TRABAJO EN SAN LUIS POTOSI",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/945421735866880/",
-    "nombre": "Lord Multitask",
-    "ciudad": "otro",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
     "url": "https://www.facebook.com/groups/670789875320793/",
     "nombre": "Venta, Compra y Alquiler de Maquinarias de Construcción",
     "ciudad": "otro",
@@ -91,178 +63,10 @@
     "empleo": false
   },
   {
-    "url": "https://www.facebook.com/groups/1498034150469238/",
-    "nombre": "RECLUTADORES SLP",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/466638983694567/",
-    "nombre": "bolsa de trabajo San Luis Potosi",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/452300738521861/",
-    "nombre": "Busco Empleo San Luis Potosí",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/1762416224260964/",
-    "nombre": "EMPLEOS EN TODO SAN LUIS POTOSÍ",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/1211002059601060/",
-    "nombre": "SOLO EMPLEOS SAN LUIS POTOSÍ",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/696919217182066/",
-    "nombre": "BOLSA DE TRABAJO URGENTE EN SAN LUIS POTOSI",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/583309198370639/",
-    "nombre": "EMPLEOS SAN LUIS POTOSÍ",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/1567896836766703/",
-    "nombre": "Ofertas De Empleo San Luis Potosi",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/1744024295823857/",
-    "nombre": "Bolsa de trabajo en San Luis Potosí ZONA INDUSTRIAL",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/915248585290203/",
-    "nombre": "Bolsa de Trabajo San Luis Potosí",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/137126770237976/",
-    "nombre": "BOLSA DE TRABAJO SAN LUIS POTOSÍ",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/1194929897190129/",
-    "nombre": "EMPLEOS EN SAN LUIS POTOSI",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/452167016617479/",
-    "nombre": "EMPLEO SAN LUIS POTOSI CONTRATACIÓN INMEDIATA",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/1390146074349543/",
-    "nombre": "BOLSA DE TRABAJO SLP",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/639927736702635/",
-    "nombre": "Bolsa de trabajo en San Luis Potosí",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/2055507094473069/",
-    "nombre": "Empleos en San Luis Potosí, SLP.",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/btslp/",
-    "nombre": "Bolsa de trabajo San Luis Potosí",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/825239051003414/",
-    "nombre": "Bolsa De Trabajo En San Luis Potosi",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/710958677344075/",
-    "nombre": "Empleos en San Luis Potosi",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/luis.rh.empleo.slp/",
-    "nombre": "Empleo San Luis Potosí 2025",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/808991849115782/",
-    "nombre": "Trabajos para programadores y desarrolladores",
-    "ciudad": "otro",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
     "url": "https://www.facebook.com/groups/1760613734242801/",
     "nombre": "Compra Venta de Maquinaria Pesada y Refacciones , Monterrey N.L.",
     "ciudad": "otro",
     "maquinaria": true,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/378180785168570/",
-    "nombre": "FLETES, RENTAS Y LOGÍSTICA, EQUIPOS DE TRANSPORTE SOLO MEXICO",
-    "ciudad": "otro",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/411258743595841/",
-    "nombre": "venta de tracto camiones, cajas secas gondolas y plataformas",
-    "ciudad": "otro",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/1281609825885065/",
-    "nombre": "Renta de full pipas, góndolas, planas, servicio de fletes solo México",
-    "ciudad": "otro",
-    "maquinaria": false,
     "empleo": false
   },
   {
@@ -301,20 +105,6 @@
     "empleo": false
   },
   {
-    "url": "https://www.facebook.com/groups/1215270863832689/",
-    "nombre": "Carga para Góndolas Coahuila",
-    "ciudad": "otro",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/1249038126041218/",
-    "nombre": "VENTA DE GONDOLAS 24M3, 26M3, 28M3, 30M3",
-    "ciudad": "otro",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
     "url": "https://www.facebook.com/groups/999486984360548/",
     "nombre": "VOLTEOS RABONES,TORTONS Y GONDOLAS DE MEXICO",
     "ciudad": "otro",
@@ -329,31 +119,10 @@
     "empleo": false
   },
   {
-    "url": "https://www.facebook.com/groups/331027141691453/",
-    "nombre": "Carga para Gondola de 30m",
-    "ciudad": "otro",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
     "url": "https://www.facebook.com/groups/1331643007754811/",
     "nombre": "Renta de volteos,gondolas y pipas full y sencillas",
     "ciudad": "otro",
     "maquinaria": true,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/209310861812161/",
-    "nombre": "Fletes full o sencillo góndola 30m3",
-    "ciudad": "otro",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/393519639070690/",
-    "nombre": "GÓNDOLAS,TRACTOS Y TODO LO RELACIONADO AL TRANSPORTE",
-    "ciudad": "otro",
-    "maquinaria": false,
     "empleo": false
   },
   {
@@ -368,13 +137,6 @@
     "nombre": "VENTA DE MAQUINARIA PESADA EN QUERETARO",
     "ciudad": "QRO",
     "maquinaria": true,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/2011407482409955/",
-    "nombre": "Arquitectos E ingenieros Cancun Y Riviera Maya",
-    "ciudad": "otro",
-    "maquinaria": false,
     "empleo": false
   },
   {
@@ -403,13 +165,6 @@
     "nombre": "VENTA MAQUINARIA INDUSTRIAL SAN LUIS POTOSI",
     "ciudad": "SLP",
     "maquinaria": true,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/2537311733095514/",
-    "nombre": "Venta tracto camión en San Luis Potosí",
-    "ciudad": "SLP",
-    "maquinaria": false,
     "empleo": false
   },
   {
@@ -455,20 +210,6 @@
     "empleo": false
   },
   {
-    "url": "https://www.facebook.com/groups/1330568484227488/",
-    "nombre": "Bolsa de Trabajo Operadores y Técnicos San Luis Potosí oficial",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": true
-  },
-  {
-    "url": "https://www.facebook.com/groups/406048096519723/",
-    "nombre": "SERVICIOS INDUSTRIALES SAN LUIS POTOSI",
-    "ciudad": "SLP",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
     "url": "https://www.facebook.com/groups/797884357846241/",
     "nombre": "Constructores, contratistas y más",
     "ciudad": "otro",
@@ -494,13 +235,6 @@
     "nombre": "CONSTRUCTORAS Y MAQUINARIA PESADA HIDALGO",
     "ciudad": "otro",
     "maquinaria": true,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/1121166582819840/",
-    "nombre": "Contratistas de San Luis Potosí SLP,MX",
-    "ciudad": "SLP",
-    "maquinaria": false,
     "empleo": false
   },
   {
@@ -536,13 +270,6 @@
     "nombre": "operadores de maquinaria pesada San Luis Potosí",
     "ciudad": "SLP",
     "maquinaria": true,
-    "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/902743854489367/",
-    "nombre": "LORD MULTITASK SIN CENSURA ORIGINAL",
-    "ciudad": "otro",
-    "maquinaria": false,
     "empleo": false
   },
   {
@@ -616,13 +343,6 @@
     "empleo": false
   },
   {
-    "url": "https://www.facebook.com/groups/739742794934644/",
-    "nombre": "RENTA DE MAQUINARÍA",
-    "ciudad": "otro",
-    "maquinaria": false,
-    "empleo": false
-  },
-  {
     "url": "https://www.facebook.com/groups/2711522792226720/",
     "nombre": "SERVICIOS DE CONSTRUCCIÓN Y RENTA DE MAQUINARIA PESADA EN S.L.P",
     "ciudad": "SLP",
@@ -670,13 +390,6 @@
     "ciudad": "otro",
     "maquinaria": true,
     "empleo": false
-  },
-  {
-    "url": "https://www.facebook.com/groups/975002112590215/",
-    "nombre": "Venta-renta, oportunidades de trabajo de maquinaria pesada en México",
-    "ciudad": "otro",
-    "maquinaria": true,
-    "empleo": true
   },
   {
     "url": "https://www.facebook.com/groups/593914664150320/",
@@ -740,5 +453,269 @@
     "ciudad": "otro",
     "maquinaria": true,
     "empleo": false
+  },
+  {
+    "url": "https://www.facebook.com/groups/394793131358732/",
+    "nombre": "Jóvenes Construyendo El Futuro San Luis Potosí",
+    "ciudad": "SLP",
+    "tipo": "jcf",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/BolsaTrabajoFEN/",
+    "nombre": "Ofertas de Bolsa de Trabajo - FEN - UASLP",
+    "ciudad": "SLP",
+    "tipo": "universidad",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/practicasprofesionales.slp/",
+    "nombre": "Practicas Profesionales - San Luis Potosi",
+    "ciudad": "SLP",
+    "tipo": "universidad",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/empleosoledaddegracianosanchez/",
+    "nombre": "Bolsa de trabajo Soledad de Graciano Sánchez, SLP",
+    "ciudad": "Soledad",
+    "tipo": "empleo_local",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/864571148727311/",
+    "nombre": "Bolsa de Trabajo en Soledad de Graciano Sánchez SLP",
+    "ciudad": "Soledad",
+    "tipo": "empleo_local",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/bolsadetrabajosanlp/",
+    "nombre": "BOLSA DE TRABAJO EN SAN LUIS POTOSI",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/466638983694567/",
+    "nombre": "bolsa de trabajo San Luis Potosi",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/452300738521861/",
+    "nombre": "Busco Empleo San Luis Potosí",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/1762416224260964/",
+    "nombre": "EMPLEOS EN TODO SAN LUIS POTOSÍ",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/1211002059601060/",
+    "nombre": "SOLO EMPLEOS SAN LUIS POTOSÍ",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/696919217182066/",
+    "nombre": "BOLSA DE TRABAJO URGENTE EN SAN LUIS POTOSI",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/583309198370639/",
+    "nombre": "EMPLEOS SAN LUIS POTOSÍ",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/1567896836766703/",
+    "nombre": "Ofertas De Empleo San Luis Potosi",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/915248585290203/",
+    "nombre": "Bolsa de Trabajo San Luis Potosí",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/137126770237976/",
+    "nombre": "BOLSA DE TRABAJO SAN LUIS POTOSÍ",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/1194929897190129/",
+    "nombre": "EMPLEOS EN SAN LUIS POTOSI",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/452167016617479/",
+    "nombre": "EMPLEO SAN LUIS POTOSI CONTRATACIÓN INMEDIATA",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/1390146074349543/",
+    "nombre": "BOLSA DE TRABAJO SLP",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/639927736702635/",
+    "nombre": "Bolsa de trabajo en San Luis Potosí",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/2055507094473069/",
+    "nombre": "Empleos en San Luis Potosí, SLP.",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/btslp/",
+    "nombre": "Bolsa de trabajo San Luis Potosí",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/710958677344075/",
+    "nombre": "Empleos en San Luis Potosi",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/luis.rh.empleo.slp/",
+    "nombre": "Empleo San Luis Potosí 2025",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/815331263778077/",
+    "nombre": "Bolsa de Empleo San Luis Potosí",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/empleosensanluispotosi.slp/",
+    "nombre": "Empleos y Vacantes San Luis Potosí (Club Empleos)",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/914266091435031/",
+    "nombre": "Empleos - Bolsa de Trabajo en San Luis Potosí 2026",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/1430894408053394/",
+    "nombre": "Bolsa de Empleo S.L.P.",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/854049246454774/",
+    "nombre": "BOLSA DE TRABAJO SLP 2025-2026",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/413117362386778/",
+    "nombre": "Bolsa de Trabajo SLP Vacantes Administrativas",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/202277657760417/",
+    "nombre": "Vacantes Administrativas SLP",
+    "ciudad": "SLP",
+    "tipo": "empleo_general",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/2593953620779234/",
+    "nombre": "Jóvenes Construyendo el Futuro (General MX/SLP)",
+    "ciudad": "MX/SLP",
+    "tipo": "jcf",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/812146173159312/",
+    "nombre": "Jóvenes Construyendo el Futuro Comunidad",
+    "ciudad": "MX/SLP",
+    "tipo": "jcf",
+    "maquinaria": false,
+    "empleo": true
+  },
+  {
+    "url": "https://www.facebook.com/groups/302617120386236/",
+    "nombre": "JCF Vinculación y Centros de Trabajo",
+    "ciudad": "MX/SLP",
+    "tipo": "jcf",
+    "maquinaria": false,
+    "empleo": true
   }
 ]

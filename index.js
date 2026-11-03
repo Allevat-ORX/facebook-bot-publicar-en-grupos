@@ -90,13 +90,16 @@ async function publicarPost(page, grupo, texto, opciones = {}) {
     // Espera a que el modal cargue del todo
     await page.waitForTimeout(esperaHumana(5000, 9000));
 
-    // ORDEN CORRECTO: primero IMAGEN (si hay), luego TEXTO. Adjuntar la imagen
-    // DESPUÉS del texto hace que FB reorganice el modal y el texto se pierda o
-    // se separe en otra publicación. Con la imagen ya cargada, el editor es estable.
+    // ORDEN CORRECTO: primero IMAGEN (si hay), luego TEXTO en el dialog.
+    const dialog = page.getByRole('dialog').first();
+    if (!await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+        throw new Error('No se abrió el cuadro de diálogo de publicación');
+    }
+
     if (imagen) {
         const rutaImg = path.isAbsolute(imagen) ? imagen : path.join(__dirname, imagen);
         try {
-            const inputFile = page.locator('input[type="file"]').last();
+            const inputFile = dialog.locator('input[type="file"]').last();
             await inputFile.setInputFiles(rutaImg);
             log(`Imagen adjuntada: ${imagen}`);
             await page.waitForTimeout(esperaHumana(7000, 12000)); // subida + preview
@@ -105,40 +108,19 @@ async function publicarPost(page, grupo, texto, opciones = {}) {
         }
     }
 
-    // Pegar el texto en el EDITOR DEL POST (no en una caja de comentarios).
-    // Se enfoca por JS con su aria-placeholder porque, tras cargar la imagen, FB
-    // superpone un overlay que intercepta los clicks normales de Playwright.
-    const enfocado = await page.evaluate(() => {
-        const cands = Array.from(document.querySelectorAll('[contenteditable="true"][role="textbox"]'));
-        const ed = cands.find((el) => {
-            const ap = (el.getAttribute('aria-placeholder') || '').toLowerCase();
-            return /post|publicaci|cosa|pensant|thinking/.test(ap);
-        });
-        if (!ed) return false;
-        ed.focus();
-        const sel = window.getSelection();
-        const range = document.createRange();
-        range.selectNodeContents(ed);
-        range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
-        return true;
-    });
-    if (!enfocado) {
-        throw new Error('No se encontró el editor del post para pegar el texto');
+    // Pegar el texto en el EDITOR DEL DIALOG (garantizado que no es el comentario del feed)
+    const editor = dialog.locator('[contenteditable="true"][role="textbox"], div[data-lexical-editor="true"], div[role="textbox"][contenteditable="true"], [contenteditable="true"]').first();
+    if (!await editor.isVisible({ timeout: 5000 }).catch(() => false)) {
+        throw new Error('No se encontró el editor de texto dentro del modal');
     }
 
-    await page.waitForTimeout(600);
-    await page.evaluate((t) => navigator.clipboard.writeText(t), texto).catch(() => {});
-    await page.keyboard.press('Control+V');
+    await editor.click();
+    await page.waitForTimeout(500);
+    await page.keyboard.insertText(texto);
     await page.waitForTimeout(1500);
 
     // Verifica que el copy entró en el editor del post
-    const textoOk = await page.evaluate(() => {
-        const cands = Array.from(document.querySelectorAll('[contenteditable="true"][role="textbox"]'));
-        const ed = cands.find((el) => /post|publicaci|cosa|pensant|thinking/.test((el.getAttribute('aria-placeholder') || '').toLowerCase()));
-        return ed ? (ed.innerText || '').trim().length : 0;
-    });
+    const textoOk = ((await editor.innerText()) || '').trim().length;
     if (textoOk > 20) {
         log(`Texto pegado (${textoOk} caracteres en el editor del post)`);
     } else {
@@ -158,12 +140,17 @@ async function publicarPost(page, grupo, texto, opciones = {}) {
         return { publicado: true, permalink: null };
     }
 
-    // MODO AUTOMATICO: pulsa "Publicar"/"Publica" (multi-idioma).
+    // Captura de pantalla de verificación justo antes de pulsar Publicar
+    try {
+        await page.screenshot({ path: 'captura-pre-publicacion.png' });
+    } catch (_) {}
+
+    // MODO AUTOMATICO: pulsa "Publicar"/"Publica" (multi-idioma) dentro del dialog.
     const botonesPublicar = ['Publicar', 'Publica', 'Post'];
     let publicado = false;
     for (const b of botonesPublicar) {
         try {
-            const btn = page.getByRole('button', { name: b, exact: true }).first();
+            const btn = dialog.getByRole('button', { name: b, exact: true }).first();
             if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
                 await btn.click();
                 publicado = true;
@@ -171,9 +158,24 @@ async function publicarPost(page, grupo, texto, opciones = {}) {
             }
         } catch (_) {}
     }
+    if (!publicado) {
+        for (const b of botonesPublicar) {
+            try {
+                const btn = page.getByRole('button', { name: b, exact: true }).first();
+                if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
+                    await btn.click();
+                    publicado = true;
+                    break;
+                }
+            } catch (_) {}
+        }
+    }
     if (!publicado) throw new Error('No se encontró el botón Publicar/Publica');
     log(`Publicación enviada en ${grupo} ✅`);
-    await page.waitForTimeout(esperaHumana(10000, 20000));
+    // Pausa humana extendida entre grupos para seguridad antispam (45 a 75 segundos)
+    const esperaEntreGrupos = esperaHumana(45000, 75000);
+    log(`Esperando ${Math.round(esperaEntreGrupos / 1000)}s antes del siguiente grupo...`);
+    await page.waitForTimeout(esperaEntreGrupos);
     return { publicado: true, permalink: null };
 }
 
@@ -299,10 +301,19 @@ async function ejecutarModoLista(page) {
             page = paginas.find((p) => p.url().includes('facebook')) || paginas[0] || await context.newPage();
             log('Conectado al navegador existente');
         } else {
-            // Abre el navegador con perfil persistente (sesión FB en ./facebook-session).
-            context = await chromium.launchPersistentContext('./facebook-session', {
-                headless: false, // false = muestra el navegador; true = segundo plano
-                args: ['--start-maximized'],
+            // Resolver carpeta de sesión (soporta --perfil=rrhh o --perfil=comercial o variable FB_SESSION_DIR)
+            let sessionPath = process.env.FB_SESSION_DIR || './facebook-session';
+            if (process.argv.includes('--perfil=rrhh') || process.env.FB_PERFIL === 'rrhh') {
+                sessionPath = path.join(__dirname, 'sessions', 'session-rrhh');
+            } else if (process.argv.includes('--perfil=comercial') || process.env.FB_PERFIL === 'comercial') {
+                sessionPath = path.join(__dirname, 'facebook-session');
+            }
+            log(`Usando perfil de sesión: ${sessionPath}`);
+
+            // Abre el navegador con perfil persistente
+            context = await chromium.launchPersistentContext(sessionPath, {
+                headless: true, // Forzado a modo sin ventana para servidor
+                args: ['--start-maximized', '--disable-notifications', '--no-sandbox'],
                 viewport: null
             });
             log('Navegador abierto');
