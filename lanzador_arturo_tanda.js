@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const cola = require('./cola');
 
-const LIMITE_TANDA = 5;
+const LIMITE_TANDA = 3;
 
 function esperaHumana(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -79,7 +79,17 @@ function esperaHumana(min, max) {
 
       // Adjuntar imagen si existe
       if (item.imagen) {
-        const rutaImg = path.resolve(__dirname, item.imagen);
+        let rutaImg = item.imagen;
+        if (item.imagen.startsWith('http://') || item.imagen.startsWith('https://')) {
+          const tempPath = '/tmp/fb_upload_' + Date.now() + '.jpg';
+          console.log('Descargando imagen remota desde Postiz a:', tempPath);
+          const res = await fetch(item.imagen);
+          const buf = await res.arrayBuffer();
+          fs.writeFileSync(tempPath, Buffer.from(buf));
+          rutaImg = tempPath;
+        } else {
+          rutaImg = path.resolve(__dirname, item.imagen);
+        }
         const photoBtn = dialog.locator('div[aria-label="Afegeix una foto o un vídeo"], div[aria-label="Añadir foto o vídeo"], div[aria-label="Foto/vídeo"], div[aria-label="Foto/video"]').first();
         if (await photoBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
           await photoBtn.click({ force: true });
