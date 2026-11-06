@@ -323,7 +323,9 @@ async function ejecutarColaWorker() {
 // ------------------------------------------------------------
 // SERVIDOR HTTP NATIVO
 // ------------------------------------------------------------
-const server = http.createServer(async (req, res) => {
+async function manejarPeticion(req, res, deps) {
+  const { cola } = deps;
+
   // CORS para permitir llamadas desde portal Odoo o apps internas
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -566,11 +568,28 @@ setInterval(cargar, 10000);
   } catch (err) {
     enviarJSON(res, 500, { error: err.message });
   }
-});
+}
 
-server.listen(PORT, () => {
-  log(`🚀 Servidor de Captación y Sondeo activo en http://0.0.0.0:${PORT}`);
-  log(`Configuración: HEADLESS=${HEADLESS}, MODO_ASISTIDO=${MODO_ASISTIDO}, MOCK_WORKER=${MOCK_WORKER}`);
-});
+function crearServidor(dependencies = {}) {
+  const deps = {
+    cola,
+    now: () => Date.now(),
+    ...dependencies,
+  };
 
-module.exports = { server, buscarGruposParaRegion, ejecutarColaWorker };
+  return http.createServer(async (req, res) => {
+    await manejarPeticion(req, res, deps);
+  });
+}
+
+if (require.main === module) {
+  const server = crearServidor();
+  server.listen(PORT, '127.0.0.1', () => {
+    log(`Servidor de captación escuchando en ${PORT}`);
+  });
+}
+
+module.exports = {
+  crearServidor,
+  buscarGruposParaRegion,
+};
