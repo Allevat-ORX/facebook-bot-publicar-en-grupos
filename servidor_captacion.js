@@ -582,14 +582,22 @@ function crearServidor(dependencies = {}) {
   });
 }
 
-if (require.main === module) {
+function iniciarServidor({ port = PORT, host = '0.0.0.0' } = {}) {
   const server = crearServidor();
-  server.listen(PORT, '127.0.0.1', () => {
-    log(`Servidor de captación escuchando en ${PORT}`);
+  server.listen(port, host);
+  return server;
+}
+
+if (require.main === module) {
+  const server = iniciarServidor({ host: process.env.HOST });
+  server.on('listening', () => {
+    const address = server.address();
+    log(`Servidor de captación escuchando en http://${address.address}:${address.port}`);
   });
 }
 
 module.exports = {
   crearServidor,
+  iniciarServidor,
   buscarGruposParaRegion,
 };
