@@ -72,15 +72,10 @@ test('reads an absent catalog as empty and finds groups by canonical ID', () => 
   assert.equal(stored.catalogo.buscar('missing'), null);
 });
 
-test('persists only validation fields while preserving commercial metadata', () => {
+test('persists only runtime validation fields and ignores name', () => {
   const { catalogPath, catalogo } = crearCatalogoTemporal([{
     facebook_group_id: '912187995658737',
     url: 'https://www.facebook.com/groups/912187995658737/',
-    name: 'Nombre histórico',
-    scope: 'local',
-    regions: ['SLP'],
-    categories: ['maquinaria'],
-    tags: [],
     membership_state: 'unknown',
     group_type: 'unknown',
     validation_state: 'pending',
@@ -90,7 +85,7 @@ test('persists only validation fields while preserving commercial metadata', () 
 
   const updated = catalogo.guardarValidacion({
     facebook_group_id: '912187995658737',
-    name: 'Nombre validado',
+    name: 'Nombre validado que pertenece a Odoo',
     membership_state: 'member',
     group_type: 'standard',
     validation_state: 'valid',
@@ -100,9 +95,17 @@ test('persists only validation fields while preserving commercial metadata', () 
     contacts: ['must-not-be-written'],
   });
 
-  assert.equal(updated.name, 'Nombre validado');
-  assert.equal(updated.scope, 'local');
+  assert.deepEqual(Object.keys(updated), [
+    'facebook_group_id',
+    'url',
+    'membership_state',
+    'group_type',
+    'validation_state',
+    'validated_at',
+    'warning',
+  ]);
   assert.equal(updated.membership_state, 'member');
+  assert.equal(updated.name, undefined);
   assert.equal(updated.cookie, undefined);
   assert.equal(updated.contacts, undefined);
   assert.deepEqual(JSON.parse(fs.readFileSync(catalogPath, 'utf8')).groups, [updated]);
@@ -164,11 +167,6 @@ test('migrates an available historical source into sanitized operational and Odo
     groups: [{
       facebook_group_id: '912187995658737',
       url: 'https://www.facebook.com/groups/912187995658737/',
-      name: 'Contratistas SLP',
-      scope: 'local',
-      regions: ['SLP'],
-      categories: ['maquinaria'],
-      tags: [],
       membership_state: 'unknown',
       group_type: 'unknown',
       validation_state: 'pending',
@@ -176,6 +174,15 @@ test('migrates an available historical source into sanitized operational and Odo
       warning: null,
     }],
   });
+  assert.deepEqual(Object.keys(operational.groups[0]), [
+    'facebook_group_id',
+    'url',
+    'membership_state',
+    'group_type',
+    'validation_state',
+    'validated_at',
+    'warning',
+  ]);
   assert.deepEqual(Object.keys(odoo.groups[0]), [
     'facebook_group_id',
     'url',
@@ -187,6 +194,28 @@ test('migrates an available historical source into sanitized operational and Odo
   ]);
   assert.equal(JSON.stringify(operational).includes('forbidden'), false);
   assert.equal(JSON.stringify(odoo).includes('forbidden'), false);
+});
+
+test('recalculates scope from the final merged region set', () => {
+  const sourceRoot = crearRaizMigracion();
+  const output = path.join(sourceRoot, 'operational.json');
+  const odooOutput = path.join(sourceRoot, 'odoo.json');
+  escribirJson(sourceRoot, '_grupos-clasificados.json', [{
+    url: 'https://www.facebook.com/groups/123/',
+    nombre: 'Constructores QRO',
+    ciudad: 'QRO',
+  }]);
+  escribirJson(sourceRoot, 'grupos_ampliados_slp_qro.json', [{
+    url: 'https://www.facebook.com/groups/123/',
+    nombre: 'Constructores SLP',
+    ciudad: 'SLP',
+  }]);
+
+  ejecutarMigracion({ sourceRoot, output, odooOutput, logger: () => {} });
+
+  const [group] = JSON.parse(fs.readFileSync(odooOutput, 'utf8')).groups;
+  assert.deepEqual(group.regions, ['QRO', 'SLP']);
+  assert.equal(group.scope, 'bajio');
 });
 
 test('reports duplicate IDs and conflicting names while producing deterministic output', () => {

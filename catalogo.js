@@ -2,7 +2,6 @@ const fs = require('node:fs');
 
 const HOSTS = new Set(['facebook.com', 'www.facebook.com', 'm.facebook.com']);
 const CAMPOS_VALIDACION = [
-  'name',
   'membership_state',
   'group_type',
   'validation_state',

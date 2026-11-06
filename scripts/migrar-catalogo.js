@@ -152,7 +152,10 @@ function consolidar(records, logger) {
 
   const groups = [...groupsById.values()]
     .sort((a, b) => compararTexto(a.facebook_group_id, b.facebook_group_id))
-    .map(({ nameWasExplicit, ...group }) => group);
+    .map(({ nameWasExplicit, ...group }) => ({
+      ...group,
+      scope: scopeParaRegiones(group.regions),
+    }));
   return { groups, duplicates, conflictingNames, invalid };
 }
 
@@ -166,8 +169,9 @@ function crearSalidas(groups) {
     categories: group.categories,
     tags: group.tags,
   }));
-  const operationalGroups = commercialGroups.map((group) => ({
-    ...group,
+  const operationalGroups = groups.map((group) => ({
+    facebook_group_id: group.facebook_group_id,
+    url: group.url,
     membership_state: 'unknown',
     group_type: 'unknown',
     validation_state: 'pending',
