@@ -378,6 +378,12 @@ function encolarLote(solicitud = {}) {
         `encolarLote: idempotency_key "${entrada.idempotency_key}" ya existe con contenido diferente`,
       );
     }
+    if (previous.batch_uuid !== batch.batch_uuid) {
+      throw crearErrorConflicto(
+        'IDEMPOTENCY_KEY_CONFLICT',
+        `encolarLote: idempotency_key "${entrada.idempotency_key}" ya pertenece a otro batch_uuid`,
+      );
+    }
     existing.push(previous);
   }
 

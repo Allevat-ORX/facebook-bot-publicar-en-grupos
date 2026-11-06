@@ -123,6 +123,76 @@ test('rejects a reused idempotency key with conflicting data deterministically',
   assert.equal(fs.readFileSync(queuePath, 'utf8'), before);
 });
 
+test('rejects identical idempotency key reuse by another batch without writing', (t) => {
+  const { queue, queuePath } = freshQueue(t);
+  queue.encolarLote(request());
+  const before = fs.readFileSync(queuePath);
+  const originalRename = fs.renameSync;
+  let renameCalls = 0;
+  fs.renameSync = (...args) => {
+    renameCalls += 1;
+    return originalRename(...args);
+  };
+
+  try {
+    assert.throws(
+      () => queue.encolarLote(request({
+        batch: { batch_uuid: OTHER_BATCH_UUID, lead_id: 2212 },
+      })),
+      (error) => {
+        assert.equal(error.code, 'IDEMPOTENCY_KEY_CONFLICT');
+        assert.equal(error.message, `encolarLote: idempotency_key "${FIRST_KEY}" ya pertenece a otro batch_uuid`);
+        return true;
+      },
+    );
+  } finally {
+    fs.renameSync = originalRename;
+  }
+
+  assert.equal(renameCalls, 0);
+  assert.deepEqual(fs.readFileSync(queuePath), before);
+  assert.equal(queue.leerCola().items.length, 1);
+});
+
+test('rejects mixed reused and new keys from another batch without writing', (t) => {
+  const { queue, queuePath } = freshQueue(t);
+  queue.encolarLote(request());
+  const before = fs.readFileSync(queuePath);
+  const originalRename = fs.renameSync;
+  let renameCalls = 0;
+  fs.renameSync = (...args) => {
+    renameCalls += 1;
+    return originalRename(...args);
+  };
+  const newItem = {
+    facebook_group_id: '123456789',
+    grupo: 'https://www.facebook.com/groups/123456789/',
+    idempotency_key: SECOND_KEY,
+    campaign_revision: 1,
+    copy: 'Se busca excavadora',
+  };
+
+  try {
+    assert.throws(
+      () => queue.encolarLote(request({
+        batch: { batch_uuid: OTHER_BATCH_UUID, lead_id: 2212 },
+        items: [request().items[0], newItem],
+      })),
+      (error) => {
+        assert.equal(error.code, 'IDEMPOTENCY_KEY_CONFLICT');
+        assert.equal(error.message, `encolarLote: idempotency_key "${FIRST_KEY}" ya pertenece a otro batch_uuid`);
+        return true;
+      },
+    );
+  } finally {
+    fs.renameSync = originalRename;
+  }
+
+  assert.equal(renameCalls, 0);
+  assert.deepEqual(fs.readFileSync(queuePath), before);
+  assert.equal(queue.leerCola().items.length, 1);
+});
+
 test('validates every batch item before creating or persisting the queue', (t) => {
   const { queue, queuePath } = freshQueue(t);
   const input = request({
