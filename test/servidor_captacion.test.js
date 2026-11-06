@@ -102,6 +102,22 @@ async function abrirServidor(t, dependencies = {}) {
   return listener;
 }
 
+function crearPayloadConBytes(totalBytes) {
+  const prefix = '{"lead_id":2212,"groups":["https://facebook.example/group"],"auto_start":false,"padding":"';
+  const suffix = '"}';
+  const paddingBytes = totalBytes - Buffer.byteLength(prefix) - Buffer.byteLength(suffix);
+  assert.ok(paddingBytes >= 0);
+  return `${prefix}${'x'.repeat(paddingBytes)}${suffix}`;
+}
+
+function restaurarVariableEntorno(name, previousValue) {
+  if (previousValue === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = previousValue;
+}
+
 test('keeps health public while queue and future operational GET routes require HMAC', async (t) => {
   const listener = await abrirServidor(t);
 
@@ -177,6 +193,87 @@ test('returns a controlled 413 and never parses or mutates an oversized body', a
   assert.equal(colaFake.enqueueCalls, 0);
 });
 
+test('uses exactly 2097152 bytes as the default request body limit', async (t) => {
+  const previousApprovedLimit = process.env.REQUEST_BODY_LIMIT_BYTES;
+  const previousObsoleteLimit = process.env.MAX_REQUEST_BODY_BYTES;
+  delete process.env.REQUEST_BODY_LIMIT_BYTES;
+  delete process.env.MAX_REQUEST_BODY_BYTES;
+
+  try {
+    const listener = await abrirServidor(t);
+    const pathname = '/api/sondeo/dispatch';
+    const bodyAtLimit = crearPayloadConBytes(2097152);
+    const bodyOverLimit = crearPayloadConBytes(2097153);
+
+    const accepted = await solicitar(listener.baseUrl, pathname, {
+      method: 'POST',
+      rawBody: bodyAtLimit,
+      headers: crearHeadersFirmados({
+        method: 'POST',
+        pathname,
+        rawBody: bodyAtLimit,
+        nonce: 'default-limit-exact-0001',
+      }),
+    });
+    const rejected = await solicitar(listener.baseUrl, pathname, {
+      method: 'POST',
+      rawBody: bodyOverLimit,
+      headers: crearHeadersFirmados({
+        method: 'POST',
+        pathname,
+        rawBody: bodyOverLimit,
+        nonce: 'default-limit-over-0002',
+      }),
+    });
+
+    assert.equal(accepted.status, 202);
+    assert.equal(rejected.status, 413);
+    assert.deepEqual(rejected.body, { error: 'payload_too_large' });
+  } finally {
+    restaurarVariableEntorno('REQUEST_BODY_LIMIT_BYTES', previousApprovedLimit);
+    restaurarVariableEntorno('MAX_REQUEST_BODY_BYTES', previousObsoleteLimit);
+  }
+});
+
+test('uses REQUEST_BODY_LIMIT_BYTES from the environment', async (t) => {
+  const previousApprovedLimit = process.env.REQUEST_BODY_LIMIT_BYTES;
+  const previousObsoleteLimit = process.env.MAX_REQUEST_BODY_BYTES;
+  process.env.REQUEST_BODY_LIMIT_BYTES = '16';
+  delete process.env.MAX_REQUEST_BODY_BYTES;
+
+  try {
+    const listener = await abrirServidor(t);
+    const response = await solicitar(listener.baseUrl, '/api/sondeo/dispatch', {
+      method: 'POST',
+      rawBody: 'x'.repeat(17),
+      headers: { 'content-type': 'application/json' },
+    });
+
+    assert.equal(response.status, 413);
+    assert.deepEqual(response.body, { error: 'payload_too_large' });
+  } finally {
+    restaurarVariableEntorno('REQUEST_BODY_LIMIT_BYTES', previousApprovedLimit);
+    restaurarVariableEntorno('MAX_REQUEST_BODY_BYTES', previousObsoleteLimit);
+  }
+});
+
+test('rejects the obsolete MAX_REQUEST_BODY_BYTES configuration name', () => {
+  const previousApprovedLimit = process.env.REQUEST_BODY_LIMIT_BYTES;
+  const previousObsoleteLimit = process.env.MAX_REQUEST_BODY_BYTES;
+  delete process.env.REQUEST_BODY_LIMIT_BYTES;
+  process.env.MAX_REQUEST_BODY_BYTES = '16';
+
+  try {
+    assert.throws(
+      () => captacion.crearServidor({ hmacSecret: HMAC_SECRET }),
+      /MAX_REQUEST_BODY_BYTES is obsolete; use REQUEST_BODY_LIMIT_BYTES/,
+    );
+  } finally {
+    restaurarVariableEntorno('REQUEST_BODY_LIMIT_BYTES', previousApprovedLimit);
+    restaurarVariableEntorno('MAX_REQUEST_BODY_BYTES', previousObsoleteLimit);
+  }
+});
+
 test('allows unsigned preflight only for configured origins', async (t) => {
   const allowedOrigin = 'https://portal.onrentx.com';
   const listener = await abrirServidor(t, { allowedOrigins: [allowedOrigin] });
@@ -231,6 +328,34 @@ test('direct startup fails before listening when the HMAC secret is missing', as
     assert.match(startupError?.message || '', /ONRENTX_HMAC_SECRET/);
   } finally {
     process.env.ONRENTX_HMAC_SECRET = previousSecret;
+  }
+});
+
+test('rejects non-numeric HMAC_MAX_SKEW_SECONDS during server creation', () => {
+  const previousSkew = process.env.HMAC_MAX_SKEW_SECONDS;
+  process.env.HMAC_MAX_SKEW_SECONDS = 'abc';
+
+  try {
+    assert.throws(
+      () => captacion.crearServidor({ hmacSecret: HMAC_SECRET }),
+      /HMAC_MAX_SKEW_SECONDS must be a non-negative integer/,
+    );
+  } finally {
+    restaurarVariableEntorno('HMAC_MAX_SKEW_SECONDS', previousSkew);
+  }
+});
+
+test('rejects negative HMAC_MAX_SKEW_SECONDS during server creation', () => {
+  const previousSkew = process.env.HMAC_MAX_SKEW_SECONDS;
+  process.env.HMAC_MAX_SKEW_SECONDS = '-1';
+
+  try {
+    assert.throws(
+      () => captacion.crearServidor({ hmacSecret: HMAC_SECRET }),
+      /HMAC_MAX_SKEW_SECONDS must be a non-negative integer/,
+    );
+  } finally {
+    restaurarVariableEntorno('HMAC_MAX_SKEW_SECONDS', previousSkew);
   }
 });
 

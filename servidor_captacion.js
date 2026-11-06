@@ -104,6 +104,15 @@ function normalizarOrigenesPermitidos(value) {
   return origins.map((origin) => origin.trim()).filter(Boolean);
 }
 
+function validarEnteroConfiguracion(value, name, minimum) {
+  const parsed = typeof value === 'string' && value.trim() === '' ? NaN : Number(value);
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < minimum) {
+    const range = minimum === 0 ? 'a non-negative integer' : 'a positive integer';
+    throw new Error(`${name} must be ${range}`);
+  }
+  return parsed;
+}
+
 function aplicarCors(req, res, allowedOrigins) {
   const origin = req.headers.origin;
   if (!origin || !allowedOrigins.includes(origin)) return false;
@@ -660,15 +669,21 @@ function crearServidor(dependencies = {}) {
   if (!dependencies.verificador && (typeof hmacSecret !== 'string' || hmacSecret.trim().length === 0)) {
     throw new Error('ONRENTX_HMAC_SECRET is required');
   }
+  if (process.env.MAX_REQUEST_BODY_BYTES !== undefined) {
+    throw new Error('MAX_REQUEST_BODY_BYTES is obsolete; use REQUEST_BODY_LIMIT_BYTES');
+  }
 
   const now = dependencies.now || (() => Date.now());
-  const maxSkewSeconds = dependencies.maxSkewSeconds
-    ?? Number(process.env.HMAC_MAX_SKEW_SECONDS || 300);
-  const maxBodyBytes = dependencies.maxBodyBytes
-    ?? Number(process.env.MAX_REQUEST_BODY_BYTES || 2_000_000);
-  if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes <= 0) {
-    throw new Error('MAX_REQUEST_BODY_BYTES must be a positive integer');
-  }
+  const maxSkewSeconds = validarEnteroConfiguracion(
+    dependencies.maxSkewSeconds ?? process.env.HMAC_MAX_SKEW_SECONDS ?? 300,
+    'HMAC_MAX_SKEW_SECONDS',
+    0,
+  );
+  const maxBodyBytes = validarEnteroConfiguracion(
+    dependencies.maxBodyBytes ?? process.env.REQUEST_BODY_LIMIT_BYTES ?? 2097152,
+    'REQUEST_BODY_LIMIT_BYTES',
+    1,
+  );
 
   const deps = {
     ...dependencies,
