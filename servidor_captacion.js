@@ -23,6 +23,7 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 const cola = require('./cola');
+const { crearVerificador } = require('./auth');
 
 const PORT = parseInt(process.env.PORT || '4599', 10);
 const HEADLESS = String(process.env.HEADLESS ?? 'true').toLowerCase() !== 'false';
@@ -57,16 +58,83 @@ function enviarJSON(res, code, obj) {
   res.end(body);
 }
 
-function leerBody(req) {
+function crearErrorPayloadDemasiadoGrande() {
+  const error = new Error('payload_too_large');
+  error.statusCode = 413;
+  return error;
+}
+
+function leerBody(req, maxBytes) {
   return new Promise((resolve, reject) => {
-    let data = '';
+    const contentLength = Number(req.headers['content-length']);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      req.resume();
+      reject(crearErrorPayloadDemasiadoGrande());
+      return;
+    }
+
+    const chunks = [];
+    let bytesRecibidos = 0;
+    let terminado = false;
+
     req.on('data', (chunk) => {
-      data += chunk;
-      if (data.length > 2e6) req.destroy(); // Límite de 2MB
+      if (terminado) return;
+      bytesRecibidos += chunk.length;
+      if (bytesRecibidos > maxBytes) {
+        terminado = true;
+        reject(crearErrorPayloadDemasiadoGrande());
+        return;
+      }
+      chunks.push(chunk);
     });
-    req.on('end', () => resolve(data));
-    req.on('error', reject);
+    req.on('end', () => {
+      if (!terminado) resolve(Buffer.concat(chunks).toString('utf8'));
+    });
+    req.on('error', (error) => {
+      if (!terminado) {
+        terminado = true;
+        reject(error);
+      }
+    });
   });
+}
+
+function normalizarOrigenesPermitidos(value) {
+  const origins = Array.isArray(value) ? value : String(value || '').split(',');
+  return origins.map((origin) => origin.trim()).filter(Boolean);
+}
+
+function aplicarCors(req, res, allowedOrigins) {
+  const origin = req.headers.origin;
+  if (!origin || !allowedOrigins.includes(origin)) return false;
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, X-OnRentX-Timestamp, X-OnRentX-Nonce, X-OnRentX-Signature',
+  );
+  return true;
+}
+
+function requiereFirma(method, pathname) {
+  return pathname.startsWith('/api/') && (method === 'GET' || method === 'POST');
+}
+
+function verificarFirma(req, pathname, rawBody, verificador) {
+  return verificador.verificar({
+    timestamp: req.headers['x-onrentx-timestamp'],
+    nonce: req.headers['x-onrentx-nonce'],
+    signature: req.headers['x-onrentx-signature'],
+    method: req.method,
+    pathname,
+    rawBody,
+  });
+}
+
+function esDireccionLocal(address = '') {
+  return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
 }
 
 // ------------------------------------------------------------
@@ -324,14 +392,14 @@ async function ejecutarColaWorker() {
 // SERVIDOR HTTP NATIVO
 // ------------------------------------------------------------
 async function manejarPeticion(req, res, deps) {
-  const { cola } = deps;
+  const { cola, verificador, maxBodyBytes, allowedOrigins } = deps;
 
-  // CORS para permitir llamadas desde portal Odoo o apps internas
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
+  const corsPermitido = aplicarCors(req, res, allowedOrigins);
   if (req.method === 'OPTIONS') {
+    if (!corsPermitido) {
+      enviarJSON(res, 403, { error: 'origin_not_allowed' });
+      return;
+    }
     res.writeHead(204);
     res.end();
     return;
@@ -339,6 +407,16 @@ async function manejarPeticion(req, res, deps) {
 
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
+    let rawBody = '';
+
+    if (requiereFirma(req.method, url.pathname)) {
+      rawBody = await leerBody(req, maxBodyBytes);
+      const resultadoFirma = verificarFirma(req, url.pathname, rawBody, verificador);
+      if (!resultadoFirma.ok) {
+        enviarJSON(res, resultadoFirma.status, { error: resultadoFirma.errorCode });
+        return;
+      }
+    }
 
     // GET /health
     if (req.method === 'GET' && url.pathname === '/health') {
@@ -374,10 +452,9 @@ async function manejarPeticion(req, res, deps) {
 
     // POST /api/sondeo/dispatch (Llamado desde Odoo Pre-Bidding Wizard)
     if (req.method === 'POST' && url.pathname === '/api/sondeo/dispatch') {
-      const raw = await leerBody(req);
       let payload;
       try {
-        payload = JSON.parse(raw);
+        payload = JSON.parse(rawBody);
       } catch (_) {
         enviarJSON(res, 400, { error: 'Payload JSON inválido' });
         return;
@@ -474,8 +551,12 @@ async function manejarPeticion(req, res, deps) {
       return;
     }
 
-    // GET / (Servir Visor HTML)
+    // GET / (Servir Visor HTML solo en loopback)
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/visor')) {
+      if (!esDireccionLocal(req.socket.remoteAddress)) {
+        enviarJSON(res, 404, { error: 'Ruta no encontrada' });
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(`<!DOCTYPE html>
 <html lang="es">
@@ -566,15 +647,42 @@ setInterval(cargar, 10000);
 
     enviarJSON(res, 404, { error: 'Ruta no encontrada' });
   } catch (err) {
+    if (err.statusCode === 413) {
+      enviarJSON(res, 413, { error: 'payload_too_large' });
+      return;
+    }
     enviarJSON(res, 500, { error: err.message });
   }
 }
 
 function crearServidor(dependencies = {}) {
+  const hmacSecret = dependencies.hmacSecret ?? process.env.ONRENTX_HMAC_SECRET;
+  if (!dependencies.verificador && (typeof hmacSecret !== 'string' || hmacSecret.trim().length === 0)) {
+    throw new Error('ONRENTX_HMAC_SECRET is required');
+  }
+
+  const now = dependencies.now || (() => Date.now());
+  const maxSkewSeconds = dependencies.maxSkewSeconds
+    ?? Number(process.env.HMAC_MAX_SKEW_SECONDS || 300);
+  const maxBodyBytes = dependencies.maxBodyBytes
+    ?? Number(process.env.MAX_REQUEST_BODY_BYTES || 2_000_000);
+  if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes <= 0) {
+    throw new Error('MAX_REQUEST_BODY_BYTES must be a positive integer');
+  }
+
   const deps = {
-    cola,
-    now: () => Date.now(),
     ...dependencies,
+    cola: dependencies.cola || cola,
+    now,
+    maxBodyBytes,
+    allowedOrigins: normalizarOrigenesPermitidos(
+      dependencies.allowedOrigins ?? process.env.CORS_ALLOWED_ORIGINS,
+    ),
+    verificador: dependencies.verificador || crearVerificador({
+      secret: hmacSecret,
+      maxSkewSeconds,
+      nowSeconds: () => Math.floor(now() / 1000),
+    }),
   };
 
   return http.createServer(async (req, res) => {
@@ -582,8 +690,8 @@ function crearServidor(dependencies = {}) {
   });
 }
 
-function iniciarServidor({ port = PORT, host = '0.0.0.0' } = {}) {
-  const server = crearServidor();
+function iniciarServidor({ port = PORT, host = '0.0.0.0', ...dependencies } = {}) {
+  const server = crearServidor(dependencies);
   server.listen(port, host);
   return server;
 }
