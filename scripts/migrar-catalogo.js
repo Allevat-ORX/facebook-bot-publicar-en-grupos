@@ -40,10 +40,12 @@ function regionesDesdeTexto(value) {
   return valoresUnicos(regions);
 }
 
+const BAJIO_REGIONS = new Set(['GTO', 'HGO', 'JAL', 'NL', 'QRO', 'SLP']);
+
 function scopeParaRegiones(regions) {
   if (regions.length === 0) return 'national';
   if (regions.length === 1) return 'local';
-  return 'bajio';
+  return regions.every((region) => BAJIO_REGIONS.has(region)) ? 'bajio' : 'national';
 }
 
 function convertirRegistro(entry, context = {}) {

@@ -871,7 +871,7 @@ test('rejects an idempotency key reused by another batch without mutating the qu
   assert.equal(JSON.stringify(dependencies.cola.leerCola()), queueAfterFirst);
 });
 
-function crearPaginaValidacion(texts, actions) {
+function crearPaginaValidacion(texts, actions, { heading = '', title = '' } = {}) {
   return {
     getByText(text) {
       return {
@@ -883,11 +883,15 @@ function crearPaginaValidacion(texts, actions) {
         },
       };
     },
-    locator: () => ({
+    locator: (selector) => ({
       first: () => ({
-        isVisible: async () => texts.some((value) => value.includes('Write something') || value.includes('Escribe algo')),
+        isVisible: async () => selector === 'h1'
+          ? Boolean(heading)
+          : texts.some((value) => value.includes('Write something') || value.includes('Escribe algo')),
+        innerText: async () => heading,
       }),
     }),
+    title: async () => title,
     goto: async (url) => actions.push(['goto', url]),
     keyboard: {
       insertText: async () => actions.push(['insertText']),
@@ -901,7 +905,9 @@ test('validates a group through the authenticated non-publishing route', async (
   const actions = [];
   let closeCalls = 0;
   let launchCalls = 0;
-  const page = crearPaginaValidacion(['You are a member', 'Write something'], actions);
+  const page = crearPaginaValidacion(['You are a member', 'Write something'], actions, {
+    heading: 'Grupo operativo real',
+  });
   const listener = await abrirServidor(t, {
     ...dependencies,
     launchPersistentContext: async () => {
@@ -925,6 +931,7 @@ test('validates a group through the authenticated non-publishing route', async (
   assert.equal(response.body.membership_state, 'member');
   assert.equal(response.body.group_type, 'standard');
   assert.equal(response.body.validation_state, 'valid');
+  assert.equal(response.body.name, 'Grupo operativo real');
   assert.equal(launchCalls, 1);
   assert.equal(closeCalls, 1);
   assert.deepEqual(actions, [['goto', response.body.url]]);
@@ -1271,9 +1278,9 @@ test('normalizes supported Facebook publishing failures into stable error codes'
   const cases = [
     ['Your session has expired', 'session_expired'],
     ['Checkpoint required', 'checkpoint_detected'],
-    ['You are not a member of this group', 'membership_not_confirmed'],
+    ['You are not a member of this group', 'not_member'],
     ['Sell Something composer', 'unsupported_composer'],
-    ['Questionnaire required', 'questionnaire'],
+    ['Questionnaire required', 'questionnaire_required'],
     ['No se localizó la caja de nueva publicación', 'composer_not_found'],
     ['Navigation timeout 45000ms exceeded', 'navigation_timeout'],
     ['unexpected Facebook failure', 'unknown'],
@@ -1352,7 +1359,13 @@ test('validates and persists a previously absent vanity group before Playwright 
         getByText: (text) => ({
           first: () => ({ isVisible: async () => ['You are a member', 'Write something'].some((value) => value.includes(text)) }),
         }),
-        locator: () => ({ first: () => ({ isVisible: async () => false }) }),
+        locator: (selector) => ({
+          first: () => ({
+            isVisible: async () => selector === 'h1',
+            innerText: async () => 'Grupo nuevo validado',
+          }),
+        }),
+        title: async () => 'Título de respaldo',
       }),
       close: async () => {},
     }),
@@ -1364,6 +1377,7 @@ test('validates and persists a previously absent vanity group before Playwright 
   });
 
   assert.equal(response.status, 200);
+  assert.equal(response.body.name, 'Grupo nuevo validado');
   assert.equal(actions[0][1], `https://www.facebook.com/groups/${groupId}/`);
   assert.equal(dependencies.catalogo.buscar(groupId).validation_state, 'warning');
   assert.equal(dependencies.catalogo.buscar(groupId).name, undefined);

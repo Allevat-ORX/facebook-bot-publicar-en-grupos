@@ -348,6 +348,16 @@ test('infers non-QRO and non-SLP historical regions and recomputes scope', () =>
     { url: 'https://facebook.com/groups/oaxaca/', nombre: 'Construcción Oaxaca' },
     { url: 'https://facebook.com/groups/tabasco/', nombre: 'Maquinaria Tabasco' },
     { url: 'https://facebook.com/groups/yucatan/', nombre: 'Equipos Yucatán' },
+    {
+      url: 'https://facebook.com/groups/qroo-yucatan/',
+      nombre: 'Maquinaria Cancún y Tulum',
+      region: 'Quintana Roo y Yucatán',
+    },
+    {
+      url: 'https://facebook.com/groups/oaxaca-tabasco/',
+      nombre: 'Construcción Oaxaca y Tabasco',
+      region: 'Oaxaca y Tabasco',
+    },
   ]);
 
   ejecutarMigracion({ sourceRoot, output, odooOutput, logger: () => {} });
@@ -361,5 +371,9 @@ test('infers non-QRO and non-SLP historical regions and recomputes scope', () =>
   assert.deepEqual(groups.find((group) => group.facebook_group_id === 'oaxaca').regions, ['OAX']);
   assert.deepEqual(groups.find((group) => group.facebook_group_id === 'tabasco').regions, ['TAB']);
   assert.deepEqual(groups.find((group) => group.facebook_group_id === 'yucatan').regions, ['YUC']);
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'qroo-yucatan').regions, ['QROO', 'YUC']);
+  assert.equal(groups.find((group) => group.facebook_group_id === 'qroo-yucatan').scope, 'national');
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'oaxaca-tabasco').regions, ['OAX', 'TAB']);
+  assert.equal(groups.find((group) => group.facebook_group_id === 'oaxaca-tabasco').scope, 'national');
   assert.equal(groups.find((group) => group.facebook_group_id === 'guanajuato-leon').scope, 'local');
 });

@@ -74,6 +74,50 @@ test('detects an explicit login signal as an expired session', async () => {
   assert.equal(await detectarSesionExpirada(pageWithTexts(['Inicia sesión'])), true);
 });
 
+function pageWithGroupName({ heading = '', title = '', texts = [] } = {}) {
+  const base = pageWithTexts(texts);
+  return {
+    ...base,
+    locator(selector) {
+      if (selector === 'h1') {
+        return {
+          first: () => ({
+            isVisible: async () => Boolean(heading),
+            innerText: async () => heading,
+          }),
+        };
+      }
+      return base.locator(selector);
+    },
+    title: async () => title,
+  };
+}
+
+test('returns the visible h1 as the detected group name', async () => {
+  const result = await validarGrupoFacebook(pageWithGroupName({
+    heading: 'Contratistas de Querétaro',
+    title: 'Fallback title',
+    texts: ['You are a member', 'Write something'],
+  }), {
+    facebook_group_id: '123',
+    url: 'https://www.facebook.com/groups/123/',
+  });
+
+  assert.equal(result.name, 'Contratistas de Querétaro');
+});
+
+test('falls back to the document title when no visible h1 exists', async () => {
+  const result = await validarGrupoFacebook(pageWithGroupName({
+    title: 'Maquinaria SLP | Grupo de Facebook',
+    texts: ['You are a member', 'Write something'],
+  }), {
+    facebook_group_id: '123',
+    url: 'https://www.facebook.com/groups/123/',
+  });
+
+  assert.equal(result.name, 'Maquinaria SLP | Grupo de Facebook');
+});
+
 test('validates a standard member group without inserting text or publishing', async () => {
   const actions = [];
   const page = {

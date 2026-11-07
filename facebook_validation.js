@@ -115,10 +115,32 @@ async function detectarTipoCompositor(page) {
   return 'standard';
 }
 
-function resultadoBase(group, membershipState, groupType, validationState, warning) {
+async function detectarNombreGrupo(page) {
+  if (typeof page.locator === 'function') {
+    try {
+      const heading = page.locator('h1').first();
+      if ((!heading.isVisible || await heading.isVisible()) && typeof heading.innerText === 'function') {
+        const name = (await heading.innerText()).trim();
+        if (name) return name;
+      }
+    } catch (_) {}
+  }
+
+  if (typeof page.title === 'function') {
+    try {
+      const title = (await page.title()).trim();
+      if (title) return title;
+    } catch (_) {}
+  }
+
+  return null;
+}
+
+function resultadoBase(group, membershipState, groupType, validationState, warning, name = null) {
   return {
     facebook_group_id: group.facebook_group_id,
     url: group.url,
+    name,
     membership_state: membershipState,
     group_type: groupType,
     validation_state: validationState,
@@ -137,8 +159,10 @@ async function validarGrupoFacebook(page, group) {
     facebook_group_id: normalized.facebook_group_id,
     url: normalized.url,
   };
+  let groupName = null;
   try {
     await page.goto(canonicalGroup.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    groupName = await detectarNombreGrupo(page);
   } catch (_) {
     return resultadoBase(canonicalGroup, 'unknown', 'unknown', 'invalid', 'navigation_error');
   }
@@ -147,25 +171,26 @@ async function validarGrupoFacebook(page, group) {
   const sessionSignal = checkpointSignal || await algunoVisible(page, SESSION_TEXTS);
   if (sessionSignal) {
     const warning = checkpointSignal ? 'checkpoint_detected' : 'session_expired';
-    return resultadoBase(canonicalGroup, 'unknown', 'unknown', 'warning', warning);
+    return resultadoBase(canonicalGroup, 'unknown', 'unknown', 'warning', warning, groupName);
   }
 
   const membershipState = await detectarMembresia(page);
   if (membershipState !== 'member') {
-    return resultadoBase(canonicalGroup, membershipState, 'unknown', 'warning', 'membership_not_confirmed');
+    return resultadoBase(canonicalGroup, membershipState, 'unknown', 'warning', 'not_member', groupName);
   }
 
   const groupType = await detectarTipoCompositor(page);
   if (groupType !== 'standard') {
-    return resultadoBase(canonicalGroup, membershipState, groupType, 'warning', 'unsupported_composer');
+    return resultadoBase(canonicalGroup, membershipState, groupType, 'warning', 'unsupported_composer', groupName);
   }
 
-  return resultadoBase(canonicalGroup, membershipState, groupType, 'valid', null);
+  return resultadoBase(canonicalGroup, membershipState, groupType, 'valid', null, groupName);
 }
 
 module.exports = {
   detectarSesionExpirada,
   detectarMembresia,
   detectarTipoCompositor,
+  detectarNombreGrupo,
   validarGrupoFacebook,
 };

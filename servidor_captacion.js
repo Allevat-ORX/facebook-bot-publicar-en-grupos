@@ -546,7 +546,7 @@ function normalizarErrorFacebook(error) {
     || source.includes('join group')
     || source.includes('unirse al grupo')
   ) {
-    errorCode = 'membership_not_confirmed';
+    errorCode = 'not_member';
   } else if (
     source.includes('unsupported_composer')
     || source.includes('buy_sell')
@@ -559,7 +559,7 @@ function normalizarErrorFacebook(error) {
     || source.includes('ask a question')
     || source.includes('haz una pregunta')
   ) {
-    errorCode = 'questionnaire';
+    errorCode = 'questionnaire_required';
   } else if (
     source.includes('composer_not_found')
     || source.includes('no se localizó la caja')
