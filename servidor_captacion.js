@@ -517,6 +517,8 @@ function normalizarErrorFacebook(error) {
     || source.includes('session has expired')
     || source.includes('sesión ha caducado')
     || source.includes('login required')
+    || source.includes('iniciar sesión')
+    || source.includes('log in')
     || source.includes('inicia sesión')
   ) {
     errorCode = 'session_expired';

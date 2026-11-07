@@ -1026,6 +1026,18 @@ test('persists session_expired for an explicit login signal', async (t) => {
   assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).validation_state, 'warning');
 });
 
+test('normalizes Iniciar sesión as session_expired case-insensitively', () => {
+  const result = captacion.normalizarErrorFacebook(new Error('INICIAR SESIÓN'));
+
+  assert.equal(result.error_code, 'session_expired');
+});
+
+test('normalizes Log in as session_expired case-insensitively', () => {
+  const result = captacion.normalizarErrorFacebook(new Error('LOG IN'));
+
+  assert.equal(result.error_code, 'session_expired');
+});
+
 test('persists an unknown composer classification as an unsupported warning', async (t) => {
   const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
   const page = crearPaginaValidacion(['You are a member', 'Unrecognized composer'], []);

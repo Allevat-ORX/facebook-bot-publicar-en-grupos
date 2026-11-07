@@ -85,3 +85,54 @@ feat(O2BF-1541): process Facebook batches safely
 ```
 
 El SHA se informa en la respuesta de cierre de la tarea.
+
+## Fix Round 1 — O2BF-1541 Captation Server Task 7
+
+### Finding corregido
+
+`normalizarErrorFacebook()` ahora mapea las señales exactas `Iniciar sesión` y `Log in` a `session_expired` mediante comparación case-insensitive, preservando los mapeos existentes. El worker conserva la parada del batch actual cuando el código normalizado es `session_expired`; no se modificó la brecha de scheduling de Task 5 ni se conectó el dispatch v2.
+
+### Evidencia TDD
+
+RED:
+
+```text
+$ node --test test/cola.test.js test/servidor_captacion.test.js
+# tests 56
+# pass 54
+# fail 2
+# Fallaron los dos casos nuevos con actual 'unknown' y esperado 'session_expired'
+```
+
+GREEN:
+
+```text
+$ node --test test/cola.test.js test/servidor_captacion.test.js
+# tests 56
+# pass 56
+# fail 0
+```
+
+Verificación completa:
+
+```text
+$ npm test
+# tests 83
+# pass 83
+# fail 0
+
+$ npm run lint
+# PASS
+
+$ git diff --check
+# PASS
+```
+
+### Archivos modificados
+
+- `servidor_captacion.js`: añade los patrones `iniciar sesión` y `log in` al mapeo existente de sesión expirada.
+- `test/servidor_captacion.test.js`: añade una regresión case-insensitive para cada señal.
+
+### Commit
+
+El único commit de Fix Round 1 está creado; el SHA se informa en la respuesta de cierre de la tarea.
