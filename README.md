@@ -80,7 +80,8 @@ npm ci
 npm run lint
 npm test
 npm run test:integration
-ONRENTX_HMAC_SECRET=validation-only-not-production docker compose config
+export ONRENTX_HMAC_SECRET="validation-only-not-production"
+docker compose config
 docker compose build
 ```
 
@@ -88,7 +89,7 @@ docker compose build
 
 ```bash
 node -e "const p=require('./package-lock.json'); const v=p.packages['node_modules/playwright'].version; const d=require('fs').readFileSync('Dockerfile','utf8'); if(!d.includes(v)) process.exit(1)"
-docker compose build
+ONRENTX_HMAC_SECRET="validation-only-not-production" docker compose build
 ```
 
 El chequeo anterior inspecciona el `Dockerfile`; `docker compose build` confirma que la imagen se puede construir desde ese Dockerfile. La imagen y la librería usan Playwright `1.60.0`.
