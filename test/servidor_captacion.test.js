@@ -1,11 +1,20 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { listen } = require('./helpers');
 const { crearCadenaCanonica, calcularFirma } = require('../auth');
+const { crearCatalogo } = require('../catalogo');
 
 const HMAC_SECRET = 'test-only-secret';
 const NOW_SECONDS = 1793990000;
+const BATCH_UUID = '123e4567-e89b-42d3-a456-426614174000';
+const FIRST_GROUP_ID = '912187995658737';
+const SECOND_GROUP_ID = '123456789';
+const FIRST_KEY = `sha256:${'0'.repeat(64)}`;
+const SECOND_KEY = `sha256:${'1'.repeat(64)}`;
 
 process.env.ONRENTX_HMAC_SECRET = HMAC_SECRET;
 process.env.MOCK_WORKER = 'true';
@@ -102,6 +111,88 @@ async function abrirServidor(t, dependencies = {}) {
   return listener;
 }
 
+function crearDependenciasV2(t, groupIds = [FIRST_GROUP_ID, SECOND_GROUP_ID]) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'orx-captacion-api-'));
+  const queuePath = path.join(directory, 'cola.json');
+  const catalogPath = path.join(directory, 'catalogo.json');
+  const previousQueuePath = process.env.COLA_PATH;
+
+  process.env.COLA_PATH = queuePath;
+  delete require.cache[require.resolve('../cola')];
+  const queue = require('../cola');
+  delete require.cache[require.resolve('../cola')];
+  restaurarVariableEntorno('COLA_PATH', previousQueuePath);
+
+  fs.writeFileSync(catalogPath, JSON.stringify({
+    version: 1,
+    groups: groupIds.map((facebookGroupId) => ({
+      facebook_group_id: facebookGroupId,
+      url: `https://www.facebook.com/groups/${facebookGroupId}/`,
+      membership_state: 'member',
+      group_type: 'standard',
+      validation_state: 'valid',
+      validated_at: '2026-11-06T20:00:00Z',
+      warning: null,
+    })),
+  }));
+
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  return {
+    cola: queue,
+    catalogo: crearCatalogo({ path: catalogPath }),
+    queuePath,
+    catalogPath,
+  };
+}
+
+function crearGrupoV2(facebookGroupId, idempotencyKey) {
+  return {
+    facebook_group_id: facebookGroupId,
+    url: `https://www.facebook.com/groups/${facebookGroupId}/`,
+    idempotency_key: idempotencyKey,
+  };
+}
+
+function crearPayloadV2(overrides = {}) {
+  return {
+    batch_uuid: BATCH_UUID,
+    lead_id: 2212,
+    machine: 'Plataforma de tijera diésel 7-8 m',
+    region: 'Querétaro',
+    duration: 14,
+    need_operator: false,
+    copy: 'Se busca plataforma de tijera diésel.',
+    groups: [crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY)],
+    auto_start: false,
+    ...overrides,
+  };
+}
+
+let signedRequestSequence = 0;
+
+async function solicitarJsonFirmado(baseUrl, pathname, payload, { nonce } = {}) {
+  const rawBody = JSON.stringify(payload);
+  signedRequestSequence += 1;
+  const headers = crearHeadersFirmados({
+    method: 'POST',
+    pathname,
+    rawBody,
+    nonce: nonce || `signed-json-${String(signedRequestSequence).padStart(4, '0')}`,
+  });
+  return solicitar(baseUrl, pathname, { method: 'POST', rawBody, headers });
+}
+
+async function solicitarGetFirmado(baseUrl, pathname, { nonce } = {}) {
+  signedRequestSequence += 1;
+  const headers = crearHeadersFirmados({
+    method: 'GET',
+    pathname,
+    rawBody: '',
+    nonce: nonce || `signed-get-request-${String(signedRequestSequence).padStart(4, '0')}`,
+  });
+  return solicitar(baseUrl, pathname, { headers });
+}
+
 function crearPayloadConBytes(totalBytes) {
   const prefix = '{"lead_id":2212,"groups":["https://facebook.example/group"],"auto_start":false,"padding":"';
   const suffix = '"}';
@@ -134,7 +225,10 @@ test('keeps health public while queue and future operational GET routes require 
 
 test('accepts a signed write once and rejects the repeated nonce before another mutation', async (t) => {
   const colaFake = crearColaFake();
-  const listener = await abrirServidor(t, { cola: colaFake });
+  const listener = await abrirServidor(t, {
+    cola: colaFake,
+    enableLegacyGroupSelection: true,
+  });
   const pathname = '/api/sondeo/dispatch';
   const rawBody = JSON.stringify({
     lead_id: 2212,
@@ -200,7 +294,7 @@ test('uses exactly 2097152 bytes as the default request body limit', async (t) =
   delete process.env.MAX_REQUEST_BODY_BYTES;
 
   try {
-    const listener = await abrirServidor(t);
+    const listener = await abrirServidor(t, { enableLegacyGroupSelection: true });
     const pathname = '/api/sondeo/dispatch';
     const bodyAtLimit = crearPayloadConBytes(2097152);
     const bodyOverLimit = crearPayloadConBytes(2097153);
@@ -374,4 +468,203 @@ test('keeps the server factory controllable with an injected verifier and no env
   } finally {
     process.env.ONRENTX_HMAC_SECRET = previousSecret;
   }
+});
+
+test('keeps the legacy string-array contract disabled unless explicitly enabled', async (t) => {
+  const pathname = '/api/sondeo/dispatch';
+  const payload = {
+    lead_id: 2212,
+    copy: 'Legacy body must not be logged',
+    groups: ['https://www.facebook.com/groups/912187995658737/'],
+    auto_start: false,
+  };
+
+  const disabledQueue = crearColaFake();
+  const disabled = await abrirServidor(t, { cola: disabledQueue });
+  const rejected = await solicitarJsonFirmado(disabled.baseUrl, pathname, payload);
+
+  assert.equal(rejected.status, 400);
+  assert.deepEqual(rejected.body, { error: 'legacy_contract_disabled' });
+  assert.equal(disabledQueue.enqueueCalls, 0);
+
+  const messages = [];
+  const enabledQueue = crearColaFake();
+  const enabled = await abrirServidor(t, {
+    cola: enabledQueue,
+    enableLegacyGroupSelection: true,
+    logger: (message) => messages.push(message),
+  });
+  const accepted = await solicitarJsonFirmado(enabled.baseUrl, pathname, payload);
+
+  assert.equal(accepted.status, 202);
+  assert.equal(enabledQueue.enqueueCalls, 1);
+  assert.ok(messages.includes('contract=legacy'));
+  assert.equal(messages.some((message) => message.includes(payload.copy)), false);
+});
+
+test('rejects every invalid strict-v2 boundary before mutating the queue', async (t) => {
+  const dependencies = crearDependenciasV2(t);
+  const listener = await abrirServidor(t, dependencies);
+  const pathname = '/api/sondeo/dispatch';
+  const secondGroup = crearGrupoV2(SECOND_GROUP_ID, SECOND_KEY);
+  const invalidCases = [
+    ['malformed batch UUID', { batch_uuid: 'not-a-uuid' }],
+    ['non-positive lead', { lead_id: 0 }],
+    ['blank copy', { copy: '   ' }],
+    ['copy beyond the Facebook limit', { copy: 'x'.repeat(63207) }],
+    ['missing groups', { groups: [] }],
+    ['more than 30 groups', {
+      groups: Array.from({ length: 31 }, (_, index) => crearGrupoV2(
+        String(800000000000000 + index),
+        `sha256:${index.toString(16).padStart(64, '0')}`,
+      )),
+    }],
+    ['duplicate group IDs', {
+      groups: [
+        crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY),
+        crearGrupoV2(FIRST_GROUP_ID, SECOND_KEY),
+      ],
+    }],
+    ['duplicate idempotency keys', {
+      groups: [crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY), { ...secondGroup, idempotency_key: FIRST_KEY }],
+    }],
+    ['non-lowercase sha256 key', {
+      groups: [{ ...crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY), idempotency_key: `sha256:${'A'.repeat(64)}` }],
+    }],
+    ['URL and ID mismatch', {
+      groups: [{ ...crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY), url: secondGroup.url }],
+    }],
+    ['non-canonical URL', {
+      groups: [{
+        ...crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY),
+        url: `https://m.facebook.com/groups/${FIRST_GROUP_ID}/?ref=share`,
+      }],
+    }],
+    ['group absent from the operational catalog', {
+      groups: [crearGrupoV2('999999999', FIRST_KEY)],
+    }],
+  ];
+
+  for (const [label, overrides] of invalidCases) {
+    const response = await solicitarJsonFirmado(
+      listener.baseUrl,
+      pathname,
+      crearPayloadV2(overrides),
+    );
+    assert.equal(response.status, 400, label);
+    assert.equal(response.body.error, 'invalid_payload', label);
+  }
+
+  assert.equal(fs.existsSync(dependencies.queuePath), false);
+});
+
+test('dispatches a two-group v2 batch idempotently and reports its signed status', async (t) => {
+  const dependencies = crearDependenciasV2(t);
+  let workerCalls = 0;
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    worker: async () => {
+      workerCalls += 1;
+    },
+  });
+  const pathname = '/api/sondeo/dispatch';
+  const payload = crearPayloadV2({
+    groups: [
+      crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY),
+      crearGrupoV2(SECOND_GROUP_ID, SECOND_KEY),
+    ],
+    auto_start: true,
+  });
+
+  const first = await solicitarJsonFirmado(listener.baseUrl, pathname, payload);
+  const retry = await solicitarJsonFirmado(listener.baseUrl, pathname, payload);
+
+  assert.equal(first.status, 202);
+  assert.equal(first.body.ok, true);
+  assert.equal(first.body.batch_uuid, BATCH_UUID);
+  assert.equal(first.body.lead_id, 2212);
+  assert.equal(first.body.state, 'queued');
+  assert.equal(first.body.worker_started, false);
+  assert.equal(first.body.items.length, 2);
+  assert.deepEqual(first.body.items.map((item) => item.facebook_group_id), [
+    FIRST_GROUP_ID,
+    SECOND_GROUP_ID,
+  ]);
+  assert.deepEqual(first.body.items.map((item) => item.state), ['queued', 'queued']);
+  assert.deepEqual(first.body.items.map((item) => item.existing), [false, false]);
+
+  assert.equal(retry.status, 202);
+  assert.deepEqual(
+    retry.body.items.map((item) => item.remote_item_id),
+    first.body.items.map((item) => item.remote_item_id),
+  );
+  assert.deepEqual(retry.body.items.map((item) => item.existing), [true, true]);
+  assert.equal(dependencies.cola.leerCola().items.length, 2);
+  assert.equal(workerCalls, 0);
+
+  const statusPath = `/api/batches/${BATCH_UUID}`;
+  const status = await solicitarGetFirmado(listener.baseUrl, statusPath);
+  assert.equal(status.status, 200);
+  assert.equal(status.body.batch_uuid, BATCH_UUID);
+  assert.equal(status.body.lead_id, 2212);
+  assert.equal(status.body.state, 'queued');
+  assert.equal(status.body.terminal, false);
+  assert.deepEqual(status.body.counts, {
+    total: 2,
+    queued: 2,
+    publishing: 0,
+    published: 0,
+    error: 0,
+    cancelled: 0,
+  });
+  assert.equal(status.body.items.length, 2);
+
+  const missingUuid = '223e4567-e89b-42d3-a456-426614174001';
+  const missing = await solicitarGetFirmado(listener.baseUrl, `/api/batches/${missingUuid}`);
+  assert.equal(missing.status, 404);
+  assert.deepEqual(missing.body, { error: 'batch_not_found' });
+
+  const invalid = await solicitarGetFirmado(listener.baseUrl, '/api/batches/not-a-uuid');
+  assert.equal(invalid.status, 400);
+  assert.deepEqual(invalid.body, { error: 'invalid_batch_uuid' });
+});
+
+test('returns a deterministic conflict when an existing batch body changes', async (t) => {
+  const dependencies = crearDependenciasV2(t);
+  const listener = await abrirServidor(t, dependencies);
+  const pathname = '/api/sondeo/dispatch';
+
+  const first = await solicitarJsonFirmado(listener.baseUrl, pathname, crearPayloadV2());
+  const changed = await solicitarJsonFirmado(
+    listener.baseUrl,
+    pathname,
+    crearPayloadV2({ copy: 'Contenido distinto para el mismo batch.' }),
+  );
+
+  assert.equal(first.status, 202);
+  assert.equal(changed.status, 409);
+  assert.deepEqual(changed.body, { error: 'batch_uuid_conflict' });
+  assert.equal(dependencies.cola.leerCola().items.length, 1);
+});
+
+test('accepts 30 explicit v2 groups without applying LIMITE_TANDA', async (t) => {
+  const groupIds = Array.from({ length: 30 }, (_, index) => String(700000000000000 + index));
+  const dependencies = crearDependenciasV2(t, groupIds);
+  const listener = await abrirServidor(t, dependencies);
+  const payload = crearPayloadV2({
+    groups: groupIds.map((facebookGroupId, index) => crearGrupoV2(
+      facebookGroupId,
+      `sha256:${index.toString(16).padStart(64, '0')}`,
+    )),
+  });
+
+  const response = await solicitarJsonFirmado(
+    listener.baseUrl,
+    '/api/sondeo/dispatch',
+    payload,
+  );
+
+  assert.equal(response.status, 202);
+  assert.equal(response.body.items.length, 30);
+  assert.equal(dependencies.cola.leerCola().items.length, 30);
 });

@@ -24,12 +24,16 @@ const path = require('path');
 const { chromium } = require('playwright');
 const cola = require('./cola');
 const { crearVerificador } = require('./auth');
+const { crearCatalogo, normalizarGrupoFacebook } = require('./catalogo');
 
 const PORT = parseInt(process.env.PORT || '4599', 10);
 const HEADLESS = String(process.env.HEADLESS ?? 'true').toLowerCase() !== 'false';
 const MODO_ASISTIDO = String(process.env.MODO_ASISTIDO ?? 'false').toLowerCase() === 'true';
 const MOCK_WORKER = String(process.env.MOCK_WORKER ?? 'false').toLowerCase() === 'true';
 const LIMITE_TANDA = parseInt(process.env.LIMITE_TANDA || '5', 10);
+const MAX_COPY_LENGTH = 63206;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IDEMPOTENCY_KEY_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const SESSION_PATH = process.env.FB_SESSION_DIR || path.join(__dirname, 'facebook-session');
 
 let isWorkerBusy = false;
@@ -144,6 +148,109 @@ function verificarFirma(req, pathname, rawBody, verificador) {
 
 function esDireccionLocal(address = '') {
   return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
+}
+
+function esContratoLegacy(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  if (payload.batch_uuid !== undefined) return false;
+  return payload.groups === undefined || (
+    Array.isArray(payload.groups) && payload.groups.every((group) => typeof group === 'string')
+  );
+}
+
+function validarPayloadV2(payload, catalogo) {
+  const errores = [];
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return ['payload debe ser un objeto'];
+  }
+
+  if (typeof payload.batch_uuid !== 'string' || !UUID_PATTERN.test(payload.batch_uuid)) {
+    errores.push('batch_uuid debe ser un UUID válido');
+  }
+  if (!Number.isSafeInteger(payload.lead_id) || payload.lead_id <= 0) {
+    errores.push('lead_id debe ser un entero positivo');
+  }
+  if (typeof payload.copy !== 'string' || payload.copy.trim().length === 0) {
+    errores.push('copy debe ser un string no vacío');
+  } else if (payload.copy.length > MAX_COPY_LENGTH) {
+    errores.push(`copy no puede superar ${MAX_COPY_LENGTH} caracteres`);
+  }
+
+  if (!Array.isArray(payload.groups) || payload.groups.length < 1 || payload.groups.length > 30) {
+    errores.push('groups debe contener entre 1 y 30 grupos');
+    return errores;
+  }
+
+  const ids = new Set();
+  const keys = new Set();
+  payload.groups.forEach((group, index) => {
+    const prefix = `groups[${index}]`;
+    if (!group || typeof group !== 'object' || Array.isArray(group)) {
+      errores.push(`${prefix} debe ser un objeto`);
+      return;
+    }
+
+    if (typeof group.facebook_group_id !== 'string' || !/^\d+$/.test(group.facebook_group_id)) {
+      errores.push(`${prefix}.facebook_group_id debe contener solo dígitos`);
+    } else if (ids.has(group.facebook_group_id)) {
+      errores.push(`${prefix}.facebook_group_id está duplicado`);
+    } else {
+      ids.add(group.facebook_group_id);
+    }
+
+    if (typeof group.idempotency_key !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(group.idempotency_key)) {
+      errores.push(`${prefix}.idempotency_key debe tener formato sha256:<64 hex minúsculas>`);
+    } else if (keys.has(group.idempotency_key)) {
+      errores.push(`${prefix}.idempotency_key está duplicada`);
+    } else {
+      keys.add(group.idempotency_key);
+    }
+
+    let normalizado;
+    try {
+      normalizado = normalizarGrupoFacebook(group.url);
+    } catch (_) {
+      errores.push(`${prefix}.url no es una URL canónica de grupo de Facebook`);
+      return;
+    }
+
+    if (
+      normalizado.facebook_group_id !== group.facebook_group_id
+      || normalizado.url !== group.url
+    ) {
+      errores.push(`${prefix}.url no coincide exactamente con facebook_group_id`);
+      return;
+    }
+
+    const destino = catalogo.buscar(group.facebook_group_id);
+    if (
+      !destino
+      || destino.url !== group.url
+      || !catalogo.esDestinoOperativo(destino)
+    ) {
+      errores.push(`${prefix} no es un destino operativo`);
+    }
+  });
+
+  return errores;
+}
+
+function respuestaDispatchV2(payload, result, colaActual) {
+  const existingIds = new Set(result.existing.map((item) => item.id));
+  return {
+    ok: true,
+    batch_uuid: payload.batch_uuid,
+    lead_id: payload.lead_id,
+    state: 'queued',
+    items: result.created.concat(result.existing).map((item) => ({
+      remote_item_id: item.id,
+      facebook_group_id: item.facebook_group_id,
+      idempotency_key: item.idempotency_key,
+      state: colaActual.estadoActual(item),
+      existing: existingIds.has(item.id),
+    })),
+    worker_started: false,
+  };
 }
 
 // ------------------------------------------------------------
@@ -401,7 +508,16 @@ async function ejecutarColaWorker() {
 // SERVIDOR HTTP NATIVO
 // ------------------------------------------------------------
 async function manejarPeticion(req, res, deps) {
-  const { cola, verificador, maxBodyBytes, allowedOrigins } = deps;
+  const {
+    cola,
+    catalogo,
+    verificador,
+    maxBodyBytes,
+    allowedOrigins,
+    enableLegacyGroupSelection,
+    worker,
+    logger,
+  } = deps;
 
   const corsPermitido = aplicarCors(req, res, allowedOrigins);
   if (req.method === 'OPTIONS') {
@@ -441,6 +557,28 @@ async function manejarPeticion(req, res, deps) {
       return;
     }
 
+    // GET /api/batches/{batch_uuid}
+    const batchMatch = url.pathname.match(/^\/api\/batches\/([^/]+)$/);
+    if (req.method === 'GET' && batchMatch) {
+      const batchUuid = batchMatch[1];
+      if (!UUID_PATTERN.test(batchUuid)) {
+        enviarJSON(res, 400, { error: 'invalid_batch_uuid' });
+        return;
+      }
+      if (!cola.existeCola()) {
+        enviarJSON(res, 404, { error: 'batch_not_found' });
+        return;
+      }
+
+      const summary = cola.resumirBatch(cola.leerCola(), batchUuid);
+      if (summary.counts.total === 0) {
+        enviarJSON(res, 404, { error: 'batch_not_found' });
+        return;
+      }
+      enviarJSON(res, 200, summary);
+      return;
+    }
+
     // GET /api/cola
     if (req.method === 'GET' && url.pathname === '/api/cola') {
       if (!cola.existeCola()) {
@@ -468,6 +606,51 @@ async function manejarPeticion(req, res, deps) {
         enviarJSON(res, 400, { error: 'Payload JSON inválido' });
         return;
       }
+
+      if (!esContratoLegacy(payload)) {
+        const errores = validarPayloadV2(payload, catalogo);
+        if (errores.length > 0) {
+          enviarJSON(res, 400, { error: 'invalid_payload', details: errores });
+          return;
+        }
+
+        let result;
+        try {
+          result = cola.encolarLote({
+            batch: {
+              batch_uuid: payload.batch_uuid,
+              lead_id: payload.lead_id,
+            },
+            items: payload.groups.map((group) => ({
+              facebook_group_id: group.facebook_group_id,
+              grupo: group.url,
+              idempotency_key: group.idempotency_key,
+              campaign_revision: 1,
+              copy: payload.copy,
+            })),
+          });
+        } catch (error) {
+          if (['BATCH_UUID_CONFLICT', 'IDEMPOTENCY_KEY_CONFLICT'].includes(error.code)) {
+            enviarJSON(res, 409, { error: error.code.toLowerCase() });
+            return;
+          }
+          if (error.code === 'INVALID_BATCH') {
+            enviarJSON(res, 400, { error: 'invalid_payload' });
+            return;
+          }
+          throw error;
+        }
+
+        logger(`contract=v2 batch=${payload.batch_uuid} groups=${payload.groups.length}`);
+        enviarJSON(res, 202, respuestaDispatchV2(payload, result, cola));
+        return;
+      }
+
+      if (!enableLegacyGroupSelection) {
+        enviarJSON(res, 400, { error: 'legacy_contract_disabled' });
+        return;
+      }
+      logger('contract=legacy');
 
       const {
         lead_id,
@@ -523,16 +706,20 @@ async function manejarPeticion(req, res, deps) {
           });
           itemsCreados.push(item);
         } catch (encErr) {
-          log(`Aviso al encolar en ${grupoUrl}: ${encErr.message}`);
+          logger(`Aviso al encolar destino legacy: ${encErr.message}`);
         }
       }
 
-      log(`Sondeo para Lead #${lead_id} (${machine} en ${region}) encolado en ${itemsCreados.length} grupos`);
+      logger(`Sondeo legacy para Lead #${lead_id} encolado en ${itemsCreados.length} grupos`);
 
       // 4. Si auto_start está activo, ejecutar en background sin bloquear la respuesta
+      let workerIniciado = false;
       if (auto_start && !isWorkerBusy) {
+        workerIniciado = true;
         setImmediate(() => {
-          ejecutarColaWorker().catch((e) => log(`Error en background worker: ${e.message}`, 'ERROR'));
+          Promise.resolve()
+            .then(() => worker())
+            .catch((error) => logger(`Error en background worker: ${error.message}`, 'ERROR'));
         });
       }
 
@@ -542,7 +729,7 @@ async function manejarPeticion(req, res, deps) {
         lead_id,
         grupos_encolados: itemsCreados.length,
         items: itemsCreados.map((i) => ({ id: i.id, grupo: i.grupo })),
-        worker_iniciado: auto_start && !isWorkerBusy,
+        worker_iniciado: workerIniciado,
       });
       return;
     }
@@ -554,7 +741,9 @@ async function manejarPeticion(req, res, deps) {
         return;
       }
       setImmediate(() => {
-        ejecutarColaWorker().catch((e) => log(`Error en worker disparado manualmente: ${e.message}`, 'ERROR'));
+        Promise.resolve()
+          .then(() => worker())
+          .catch((error) => logger(`Error en worker disparado manualmente: ${error.message}`, 'ERROR'));
       });
       enviarJSON(res, 202, { ok: true, message: 'Worker iniciado en segundo plano' });
       return;
@@ -688,6 +877,15 @@ function crearServidor(dependencies = {}) {
   const deps = {
     ...dependencies,
     cola: dependencies.cola || cola,
+    catalogo: dependencies.catalogo || crearCatalogo({
+      path: dependencies.catalogPath
+        || process.env.CATALOGO_PATH
+        || path.join(__dirname, 'catalogo_grupos.json'),
+    }),
+    enableLegacyGroupSelection: dependencies.enableLegacyGroupSelection
+      ?? String(process.env.ENABLE_LEGACY_GROUP_SELECTION ?? 'false').toLowerCase() === 'true',
+    worker: dependencies.worker || ejecutarColaWorker,
+    logger: dependencies.logger || log,
     now,
     maxBodyBytes,
     allowedOrigins: normalizarOrigenesPermitidos(
