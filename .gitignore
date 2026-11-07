@@ -29,3 +29,12 @@ cola.json
 # Archivos temporales del sistema operativo
 .DS_Store
 Thumbs.db
+
+# Catálogo operativo validado (solo se versiona catalogo_grupos.ejemplo.json)
+catalogo_grupos.json
+
+# Datos operativos del volumen montado (cola y catálogo generados)
+data/
+
+# Artefactos generados por Superpowers/Kiro; no forman parte del código
+.superpowers/

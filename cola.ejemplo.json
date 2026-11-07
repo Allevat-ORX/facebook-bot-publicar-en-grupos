@@ -1,52 +1,52 @@
 {
-  "version": 1,
+  "version": 2,
   "items": [
     {
       "id": "orx-2026-09-23-0001",
-      "correlation_id": "dify-run-abc123",
-      "owner": "onrentx-marketing",
-      "grupo": "https://www.facebook.com/groups/123456789",
+      "batch_uuid": "123e4567-e89b-42d3-a456-426614174000",
+      "lead_id": 2212,
+      "facebook_group_id": "123456789",
+      "idempotency_key": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "campaign_revision": 1,
+      "copy": "¿Tienes la obra parada por falta de maquinaria? En OnRentX te conectamos con proveedores de renta.",
+      "correlation_id": "lead-2212",
+      "owner": "odoo-prebidding",
+      "grupo": "https://www.facebook.com/groups/123456789/",
       "tipo": "texto",
       "copies": [
-        "¿Tienes la obra parada por falta de maquinaria? En OnRentX te conectamos con proveedores de renta. Escríbenos: https://www.facebook.com/OnRentX/",
-        "Maquinaria para tu obra, sin complicarte. OnRentX te ayuda a encontrar y rentar el equipo que necesitas. https://www.facebook.com/OnRentX/"
+        "¿Tienes la obra parada por falta de maquinaria? En OnRentX te conectamos con proveedores de renta."
       ],
       "imagen": null,
       "link_marketplace": null,
-      "estado": "aprobado",
+      "estado": "queued",
       "permalink": null,
-      "log": []
+      "log": [
+        "[2026-09-23T10:00:00.000Z] encolado batch=123e4567-e89b-42d3-a456-426614174000"
+      ]
     },
     {
       "id": "orx-2026-09-23-0002",
-      "correlation_id": "dify-run-abc124",
-      "owner": "onrentx-marketing",
-      "grupo": "https://www.facebook.com/groups/987654321",
-      "tipo": "imagen",
+      "batch_uuid": "123e4567-e89b-42d3-a456-426614174000",
+      "lead_id": 2212,
+      "facebook_group_id": "987654321",
+      "idempotency_key": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "campaign_revision": 1,
+      "copy": "Se busca plataforma de tijera para una obra en el Bajío.",
+      "correlation_id": "lead-2212",
+      "owner": "odoo-prebidding",
+      "grupo": "https://www.facebook.com/groups/987654321/",
+      "tipo": "texto",
       "copies": [
-        "Excavadora disponible para renta en tu zona. Cuéntanos tu proyecto en OnRentX: https://www.facebook.com/OnRentX/"
-      ],
-      "imagen": "creativos/EJEMPLO-pon-aqui-la-ruta.jpg",
-      "link_marketplace": null,
-      "estado": "pendiente",
-      "_nota": "tipo imagen: la ruta debe existir en disco al validar. Aquí es un placeholder; Dify/AIS-400 la rellena con el creativo real.",
-      "permalink": null,
-      "log": []
-    },
-    {
-      "id": "orx-2026-09-23-0003",
-      "correlation_id": "dify-run-abc125",
-      "owner": "onrentx-marketing",
-      "grupo": "https://www.facebook.com/groups/555555555",
-      "tipo": "link",
-      "copies": [
-        "Retroexcavadora en renta — publicada en Marketplace. Ver detalles y contactar 👇"
+        "Se busca plataforma de tijera para una obra en el Bajío."
       ],
       "imagen": null,
-      "link_marketplace": "https://www.facebook.com/marketplace/item/1122334455",
-      "estado": "rechazado",
-      "permalink": null,
-      "log": []
+      "link_marketplace": null,
+      "estado": "published",
+      "permalink": "https://www.facebook.com/groups/987654321/posts/1122334455",
+      "log": [
+        "[2026-09-23T10:00:00.000Z] encolado batch=123e4567-e89b-42d3-a456-426614174000",
+        "[2026-09-23T10:05:00.000Z] estado=published | permalink=https://www.facebook.com/groups/987654321/posts/1122334455"
+      ]
     }
   ]
 }
