@@ -787,3 +787,156 @@ test('rejects an idempotency key reused by another batch without mutating the qu
   assert.deepEqual(conflict.body, { error: 'idempotency_key_conflict' });
   assert.equal(JSON.stringify(dependencies.cola.leerCola()), queueAfterFirst);
 });
+
+function crearPaginaValidacion(texts, actions) {
+  return {
+    getByText(text) {
+      return {
+        first() {
+          return {
+            isVisible: async () => texts.some((value) => value.includes(text)),
+          };
+        },
+      };
+    },
+    goto: async (url) => actions.push(['goto', url]),
+    keyboard: {
+      insertText: async () => actions.push(['insertText']),
+      press: async (key) => actions.push(['press', key]),
+    },
+  };
+}
+
+test('validates a group through the authenticated non-publishing route', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  const actions = [];
+  let closeCalls = 0;
+  let launchCalls = 0;
+  const page = crearPaginaValidacion(['You are a member', 'Write something'], actions);
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => {
+      launchCalls += 1;
+      return {
+        newPage: async () => page,
+        close: async () => { closeCalls += 1; },
+      };
+    },
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: FIRST_GROUP_ID,
+    url: `https://m.facebook.com/groups/${FIRST_GROUP_ID}/?ref=share`,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.facebook_group_id, FIRST_GROUP_ID);
+  assert.equal(response.body.url, `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`);
+  assert.equal(response.body.membership_state, 'member');
+  assert.equal(response.body.group_type, 'standard');
+  assert.equal(response.body.validation_state, 'valid');
+  assert.equal(launchCalls, 1);
+  assert.equal(closeCalls, 1);
+  assert.deepEqual(actions, [['goto', response.body.url]]);
+  assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).name, undefined);
+  assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).validation_state, 'valid');
+});
+
+test('rejects a mismatched ID and URL before opening the profile', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  let launchCalls = 0;
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => {
+      launchCalls += 1;
+      throw new Error('must not launch');
+    },
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: FIRST_GROUP_ID,
+    url: `https://www.facebook.com/groups/${SECOND_GROUP_ID}/`,
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body, { error: 'facebook_group_mismatch' });
+  assert.equal(launchCalls, 0);
+});
+
+test('records unsupported buy and sell composers as a warning without publishing', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  const actions = [];
+  const page = crearPaginaValidacion(['You are a member', 'Sell Something'], actions);
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => ({
+      newPage: async () => page,
+      close: async () => {},
+    }),
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: FIRST_GROUP_ID,
+    url: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.group_type, 'buy_sell');
+  assert.equal(response.body.validation_state, 'warning');
+  assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).group_type, 'buy_sell');
+  assert.equal(actions.some(([name]) => name === 'insertText'), false);
+  assert.equal(actions.some(([name]) => name === 'clickPublish'), false);
+});
+
+test('requires HMAC before validating a group or opening the profile', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  let launchCalls = 0;
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => {
+      launchCalls += 1;
+      throw new Error('must not launch');
+    },
+  });
+
+  const response = await solicitar(listener.baseUrl, '/api/groups/validate', {
+    method: 'POST',
+    rawBody: JSON.stringify({
+      facebook_group_id: FIRST_GROUP_ID,
+      url: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+    }),
+    headers: { 'content-type': 'application/json' },
+  });
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(response.body, { error: 'missing_signature' });
+  assert.equal(launchCalls, 0);
+});
+
+test('persists an expired-session warning and closes the profile context', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  const actions = [];
+  let closeCalls = 0;
+  const page = crearPaginaValidacion(['Your session has expired'], actions);
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => ({
+      newPage: async () => page,
+      close: async () => { closeCalls += 1; },
+    }),
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: FIRST_GROUP_ID,
+    url: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.membership_state, 'unknown');
+  assert.equal(response.body.group_type, 'unknown');
+  assert.equal(response.body.validation_state, 'warning');
+  assert.equal(response.body.warning, 'session_expired');
+  assert.equal(closeCalls, 1);
+  assert.deepEqual(actions, [['goto', response.body.url]]);
+});

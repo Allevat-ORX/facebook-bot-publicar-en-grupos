@@ -25,6 +25,7 @@ const { chromium } = require('playwright');
 const cola = require('./cola');
 const { crearVerificador } = require('./auth');
 const { crearCatalogo, normalizarGrupoFacebook } = require('./catalogo');
+const { validarGrupoFacebook } = require('./facebook_validation');
 
 const PORT = parseInt(process.env.PORT || '4599', 10);
 const HEADLESS = String(process.env.HEADLESS ?? 'true').toLowerCase() !== 'false';
@@ -518,6 +519,9 @@ async function manejarPeticion(req, res, deps) {
     worker,
     logger,
     maxCopyCodePoints,
+    launchPersistentContext,
+    sessionPath,
+    validateGroup,
   } = deps;
 
   const corsPermitido = aplicarCors(req, res, allowedOrigins);
@@ -555,6 +559,79 @@ async function manejarPeticion(req, res, deps) {
         headless: HEADLESS,
         mock_mode: MOCK_WORKER,
       });
+      return;
+    }
+
+    // POST /api/groups/validate
+    if (req.method === 'POST' && url.pathname === '/api/groups/validate') {
+      let payload;
+      try {
+        payload = JSON.parse(rawBody);
+      } catch (_) {
+        enviarJSON(res, 400, { error: 'invalid_json' });
+        return;
+      }
+
+      if (
+        !payload
+        || typeof payload !== 'object'
+        || Array.isArray(payload)
+        || typeof payload.facebook_group_id !== 'string'
+        || typeof payload.url !== 'string'
+      ) {
+        enviarJSON(res, 400, { error: 'invalid_group' });
+        return;
+      }
+
+      let normalized;
+      try {
+        normalized = normalizarGrupoFacebook(payload.url);
+      } catch (_) {
+        enviarJSON(res, 400, { error: 'invalid_facebook_group_url' });
+        return;
+      }
+      if (normalized.facebook_group_id !== payload.facebook_group_id) {
+        enviarJSON(res, 400, { error: 'facebook_group_mismatch' });
+        return;
+      }
+
+      if (!catalogo.buscar(normalized.facebook_group_id)) {
+        enviarJSON(res, 404, { error: 'facebook_group_not_found' });
+        return;
+      }
+      if (isWorkerBusy) {
+        enviarJSON(res, 409, { error: 'profile_busy' });
+        return;
+      }
+
+      isWorkerBusy = true;
+      let context = null;
+      try {
+        context = await launchPersistentContext(sessionPath, {
+          headless: HEADLESS,
+          args: [
+            '--disable-notifications',
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+          ],
+          viewport: { width: 1280, height: 800 },
+        });
+        const page = await context.newPage();
+        const result = await validateGroup(page, {
+          facebook_group_id: normalized.facebook_group_id,
+          url: normalized.url,
+        });
+        catalogo.guardarValidacion(result);
+        enviarJSON(res, 200, { ok: true, ...result });
+      } finally {
+        if (context) {
+          try {
+            await context.close();
+          } catch (_) {}
+        }
+        isWorkerBusy = false;
+      }
       return;
     }
 
@@ -892,6 +969,12 @@ function crearServidor(dependencies = {}) {
       ?? String(process.env.ENABLE_LEGACY_GROUP_SELECTION ?? 'false').toLowerCase() === 'true',
     worker: dependencies.worker || ejecutarColaWorker,
     logger: dependencies.logger || log,
+    launchPersistentContext: dependencies.launchPersistentContext
+      || ((...args) => chromium.launchPersistentContext(...args)),
+    sessionPath: dependencies.sessionPath || SESSION_PATH,
+    validateGroup: dependencies.validateGroup
+      || dependencies.validarGrupoFacebook
+      || validarGrupoFacebook,
     now,
     maxBodyBytes,
     maxCopyCodePoints,
