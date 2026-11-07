@@ -843,6 +843,47 @@ test('validates a group through the authenticated non-publishing route', async (
   assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).validation_state, 'valid');
 });
 
+test('returns profile_busy while a worker owns the persistent profile', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  let launchCalls = 0;
+  let signalLaunch;
+  let releaseLaunch;
+  const launchEntered = new Promise((resolve) => { signalLaunch = resolve; });
+  const launchReleased = new Promise((resolve) => { releaseLaunch = resolve; });
+  const page = crearPaginaValidacion(['You are a member', 'Write something'], []);
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => {
+      launchCalls += 1;
+      signalLaunch();
+      await launchReleased;
+      return {
+        newPage: async () => page,
+        close: async () => {},
+      };
+    },
+  });
+
+  const firstResponsePromise = solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: FIRST_GROUP_ID,
+    url: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+  });
+  await launchEntered;
+
+  const busyResponse = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: FIRST_GROUP_ID,
+    url: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+  });
+
+  assert.equal(busyResponse.status, 409);
+  assert.deepEqual(busyResponse.body, { error: 'profile_busy' });
+  assert.equal(launchCalls, 1);
+
+  releaseLaunch();
+  const firstResponse = await firstResponsePromise;
+  assert.equal(firstResponse.status, 200);
+});
+
 test('rejects a mismatched ID and URL before opening the profile', async (t) => {
   const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
   let launchCalls = 0;
@@ -939,4 +980,73 @@ test('persists an expired-session warning and closes the profile context', async
   assert.equal(response.body.warning, 'session_expired');
   assert.equal(closeCalls, 1);
   assert.deepEqual(actions, [['goto', response.body.url]]);
+});
+
+test('persists checkpoint_detected for security checkpoint signals', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  const page = crearPaginaValidacion(['Security Check'], []);
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => ({
+      newPage: async () => page,
+      close: async () => {},
+    }),
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: FIRST_GROUP_ID,
+    url: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.warning, 'checkpoint_detected');
+  assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).warning, 'checkpoint_detected');
+  assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).validation_state, 'warning');
+});
+
+test('persists session_expired for an explicit login signal', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  const page = crearPaginaValidacion(['Inicia sesión'], []);
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => ({
+      newPage: async () => page,
+      close: async () => {},
+    }),
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: FIRST_GROUP_ID,
+    url: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.warning, 'session_expired');
+  assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).warning, 'session_expired');
+  assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).validation_state, 'warning');
+});
+
+test('persists an unknown composer classification as an unsupported warning', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  const page = crearPaginaValidacion(['You are a member', 'Unrecognized composer'], []);
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => ({
+      newPage: async () => page,
+      close: async () => {},
+    }),
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: FIRST_GROUP_ID,
+    url: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.membership_state, 'member');
+  assert.equal(response.body.group_type, 'unknown');
+  assert.equal(response.body.validation_state, 'warning');
+  assert.equal(response.body.warning, 'unsupported_composer');
+  assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).group_type, 'unknown');
+  assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).validation_state, 'warning');
 });

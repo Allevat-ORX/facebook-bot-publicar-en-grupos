@@ -7,6 +7,8 @@ const SESSION_TEXTS = [
   'Log In',
   'Your session has expired',
   'Tu sesión ha caducado',
+];
+const CHECKPOINT_TEXTS = [
   'Checkpoint',
   'checkpoint',
   'Confirm your identity',
@@ -14,14 +16,12 @@ const SESSION_TEXTS = [
   'Security Check',
   'Comprobación de seguridad',
 ];
-const MEMBER_TEXTS = [
+const MEMBER_PHRASES = [
   'You are a member',
   'You’re a member',
-  'Member',
-  'Miembro',
   'Eres miembro',
-  'Membre',
 ];
+const MEMBER_ACTION_TEXTS = ['Member', 'Miembro', 'Membre'];
 const NOT_MEMBER_TEXTS = [
   'Join Group',
   'Join group',
@@ -42,28 +42,32 @@ const QUESTIONNAIRE_TEXTS = [
   'Pregunta algo',
 ];
 
-async function textoVisible(page, text) {
+async function textoVisible(page, text, options = {}) {
   try {
-    return await page.getByText(text, { exact: false }).first().isVisible();
+    return await page.getByText(text, { exact: false, ...options }).first().isVisible();
   } catch (_) {
     return false;
   }
 }
 
-async function algunoVisible(page, texts) {
+async function algunoVisible(page, texts, options = {}) {
   for (const text of texts) {
-    if (await textoVisible(page, text)) return text;
+    if (await textoVisible(page, text, options)) return text;
   }
   return null;
 }
 
 async function detectarSesionExpirada(page) {
-  return Boolean(await algunoVisible(page, SESSION_TEXTS));
+  return Boolean(
+    (await algunoVisible(page, SESSION_TEXTS))
+    || (await algunoVisible(page, CHECKPOINT_TEXTS)),
+  );
 }
 
 async function detectarMembresia(page) {
   if (await algunoVisible(page, NOT_MEMBER_TEXTS)) return 'not_member';
-  if (await algunoVisible(page, MEMBER_TEXTS)) return 'member';
+  if (await algunoVisible(page, MEMBER_PHRASES)) return 'member';
+  if (await algunoVisible(page, MEMBER_ACTION_TEXTS, { exact: true })) return 'member';
   return 'unknown';
 }
 
@@ -98,11 +102,10 @@ async function validarGrupoFacebook(page, group) {
   };
   await page.goto(canonicalGroup.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
-  const sessionSignal = await algunoVisible(page, SESSION_TEXTS);
+  const checkpointSignal = await algunoVisible(page, CHECKPOINT_TEXTS);
+  const sessionSignal = checkpointSignal || await algunoVisible(page, SESSION_TEXTS);
   if (sessionSignal) {
-    const warning = sessionSignal.toLowerCase().includes('checkpoint')
-      ? 'checkpoint_detected'
-      : 'session_expired';
+    const warning = checkpointSignal ? 'checkpoint_detected' : 'session_expired';
     return resultadoBase(canonicalGroup, 'unknown', 'unknown', 'warning', warning);
   }
 

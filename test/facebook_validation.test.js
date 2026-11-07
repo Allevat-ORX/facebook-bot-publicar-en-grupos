@@ -9,10 +9,14 @@ const {
 
 function pageWithTexts(texts) {
   return {
-    getByText(text) {
+    getByText(text, options = {}) {
       return {
         first() {
-          return { isVisible: async () => texts.some((value) => value.includes(text)) };
+          return {
+            isVisible: async () => texts.some((value) => (
+              options.exact ? value === text : value.includes(text)
+            )),
+          };
         },
       };
     },
@@ -41,6 +45,23 @@ test('detects membership states independently from composer type', async () => {
   assert.equal(await detectarMembresia(pageWithTexts(['You are a member'])), 'member');
   assert.equal(await detectarMembresia(pageWithTexts(['Join Group'])), 'not_member');
   assert.equal(await detectarMembresia(pageWithTexts(['Group overview'])), 'unknown');
+});
+
+test('does not classify plural navigation labels as membership', async () => {
+  assert.equal(await detectarMembresia(pageWithTexts(['Members'])), 'unknown');
+  assert.equal(await detectarMembresia(pageWithTexts(['Miembros'])), 'unknown');
+});
+
+test('classifies a singular member action as membership', async () => {
+  assert.equal(await detectarMembresia(pageWithTexts(['Member'])), 'member');
+});
+
+test('returns unknown for an unrecognized composer', async () => {
+  assert.equal(await detectarTipoCompositor(pageWithTexts(['Group overview'])), 'unknown');
+});
+
+test('detects an explicit login signal as an expired session', async () => {
+  assert.equal(await detectarSesionExpirada(pageWithTexts(['Inicia sesión'])), true);
 });
 
 test('validates a standard member group without inserting text or publishing', async () => {
