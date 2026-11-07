@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:integration": "node --test test/servidor_captacion.test.js",
-    "lint": "node --check servidor_captacion.js && node --check cola.js"
+    "lint": "node --check servidor_captacion.js && node --check cola.js && node --check auth.js && node --check catalogo.js && node --check facebook_validation.js"
   },
   "keywords": [],
   "author": "",
