@@ -381,3 +381,35 @@ test('updates a v2 item atomically while preserving legacy update exports', (t) 
   assert.equal(typeof queue.marcarItem, 'function');
   assert.equal(typeof queue.encolarItem, 'function');
 });
+
+test('selects only queued items from the requested batch without recovering publishing items', (t) => {
+  const { queue } = freshQueue(t);
+  const data = {
+    version: 2,
+    items: [
+      { id: 'batch-a-queued', batch_uuid: BATCH_UUID, estado: 'queued' },
+      { id: 'batch-a-publishing', batch_uuid: BATCH_UUID, estado: 'publishing' },
+      { id: 'batch-b-queued', batch_uuid: OTHER_BATCH_UUID, estado: 'queued' },
+      { id: 'legacy-approved', estado: 'aprobado' },
+    ],
+  };
+
+  assert.deepEqual(
+    queue.itemsProcesables(data, { batchUuid: BATCH_UUID }).map((item) => item.id),
+    ['batch-a-queued'],
+  );
+  assert.equal(data.items[1].estado, 'publishing');
+  assert.deepEqual(queue.itemsProcesables(data, { batchUuid: OTHER_BATCH_UUID }).map((item) => item.id), [
+    'batch-b-queued',
+  ]);
+});
+
+test('does not select queued items globally when a batch is not provided', (t) => {
+  const { queue } = freshQueue(t);
+  const data = {
+    version: 2,
+    items: [{ id: 'queued-item', batch_uuid: BATCH_UUID, estado: 'queued' }],
+  };
+
+  assert.deepEqual(queue.itemsProcesables(data), []);
+});

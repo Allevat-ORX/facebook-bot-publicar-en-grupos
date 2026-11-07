@@ -93,6 +93,13 @@ function itemsAprobados(data) {
   return data.items.filter((item) => item.estado === 'aprobado');
 }
 
+// Devuelve únicamente items v2 encolados de un batch explícito. No recupera
+// items publishing después de un reinicio y nunca hace selección global.
+function itemsProcesables(data, { batchUuid } = {}) {
+  if (typeof batchUuid !== 'string' || batchUuid.length === 0) return [];
+  return data.items.filter((item) => item.batch_uuid === batchUuid && item.estado === 'queued');
+}
+
 // Elige una variante de copy AL AZAR de un item (anti-repetición, ver AIS-434).
 function elegirCopy(item) {
   const i = Math.floor(Math.random() * item.copies.length);
@@ -427,6 +434,7 @@ module.exports = {
   validarItem,
   validarCola,
   itemsAprobados,
+  itemsProcesables,
   elegirCopy,
   guardarCola,
   guardarColaAtomica,

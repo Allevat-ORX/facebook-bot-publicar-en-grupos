@@ -414,7 +414,7 @@ async function publicarPostEnGrupo(page, grupoUrl, texto, opciones = {}) {
 // ------------------------------------------------------------
 // WORKER DE EJECUCIÓN DE COLA
 // ------------------------------------------------------------
-async function ejecutarColaWorker() {
+async function ejecutarColaLegacy() {
   if (isWorkerBusy) {
     log('Worker ya se encuentra en ejecución, omitiendo nuevo disparo concurrente');
     return { busy: true };
@@ -500,6 +500,135 @@ async function ejecutarColaWorker() {
     }
     isWorkerBusy = false;
     log(`Worker finalizado. Resultados: ${exitosos} exitosos, ${fallidos} fallidos`);
+  }
+
+  return { procesados: exitosos + fallidos, exitosos, fallidos };
+}
+
+function normalizarErrorFacebook(error) {
+  const errorMessage = error && error.message ? error.message : String(error || 'unknown');
+  const source = `${error?.code || ''} ${errorMessage}`.toLowerCase();
+  let errorCode = 'unknown';
+
+  if (source.includes('checkpoint') || source.includes('security check')) {
+    errorCode = 'checkpoint_detected';
+  } else if (
+    source.includes('session_expired')
+    || source.includes('session has expired')
+    || source.includes('sesión ha caducado')
+    || source.includes('login required')
+    || source.includes('inicia sesión')
+  ) {
+    errorCode = 'session_expired';
+  } else if (
+    source.includes('not a member')
+    || source.includes('membership')
+    || source.includes('membership_not_confirmed')
+    || source.includes('join group')
+    || source.includes('unirse al grupo')
+  ) {
+    errorCode = 'membership_not_confirmed';
+  } else if (
+    source.includes('unsupported_composer')
+    || source.includes('buy_sell')
+    || source.includes('sell something')
+    || source.includes('vender algo')
+  ) {
+    errorCode = 'unsupported_composer';
+  } else if (
+    source.includes('questionnaire')
+    || source.includes('ask a question')
+    || source.includes('haz una pregunta')
+  ) {
+    errorCode = 'questionnaire';
+  } else if (
+    source.includes('composer_not_found')
+    || source.includes('no se localizó la caja')
+    || source.includes('no se encontró el editor')
+    || source.includes('no se localizó el botón publicar')
+  ) {
+    errorCode = 'composer_not_found';
+  } else if (
+    source.includes('navigation_timeout')
+    || source.includes('navigation timeout')
+    || source.includes('timeout')
+  ) {
+    errorCode = 'navigation_timeout';
+  }
+
+  return { error_code: errorCode, error_message: errorMessage };
+}
+
+function crearContextoFacebook() {
+  return chromium.launchPersistentContext(SESSION_PATH, {
+    headless: HEADLESS,
+    args: [
+      '--disable-notifications',
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+    ],
+    viewport: { width: 1280, height: 800 },
+  });
+}
+
+async function ejecutarColaWorker({
+  batchUuid,
+  cola: colaDependencia = cola,
+  crearContexto = crearContextoFacebook,
+  publicar = publicarPostEnGrupo,
+} = {}) {
+  if (isWorkerBusy) {
+    log('Worker ya se encuentra en ejecución, omitiendo nuevo disparo concurrente');
+    return { busy: true };
+  }
+  if (typeof batchUuid !== 'string' || batchUuid.length === 0 || !colaDependencia.existeCola()) {
+    return { procesados: 0 };
+  }
+
+  const dataCola = colaDependencia.leerCola();
+  const pendientes = colaDependencia.itemsProcesables(dataCola, { batchUuid });
+  if (pendientes.length === 0) return { procesados: 0 };
+
+  isWorkerBusy = true;
+  workerStats.lastRun = new Date().toISOString();
+  let context = null;
+  let exitosos = 0;
+  let fallidos = 0;
+
+  try {
+    context = await crearContexto();
+    const page = await context.newPage();
+
+    for (const item of pendientes) {
+      colaDependencia.actualizarItem(dataCola, item.id, 'publishing', {
+        publishing_at: new Date().toISOString(),
+      });
+      try {
+        const copy = item.copy || (Array.isArray(item.copies) ? item.copies[0] : '');
+        const result = await publicar(page, item.grupo, copy, { imagen: item.imagen });
+        colaDependencia.actualizarItem(dataCola, item.id, 'published', {
+          published_at: new Date().toISOString(),
+          permalink: result?.permalink || null,
+        });
+        exitosos++;
+        workerStats.totalPublished++;
+      } catch (error) {
+        const normalized = normalizarErrorFacebook(error);
+        colaDependencia.actualizarItem(dataCola, item.id, 'error', normalized);
+        fallidos++;
+        workerStats.totalErrors++;
+        workerStats.lastError = normalized.error_message;
+        if (normalized.error_code === 'session_expired') break;
+      }
+    }
+  } finally {
+    if (context) {
+      try {
+        await context.close();
+      } catch (_) {}
+    }
+    isWorkerBusy = false;
   }
 
   return { procesados: exitosos + fallidos, exitosos, fallidos };
@@ -967,7 +1096,7 @@ function crearServidor(dependencies = {}) {
     }),
     enableLegacyGroupSelection: dependencies.enableLegacyGroupSelection
       ?? String(process.env.ENABLE_LEGACY_GROUP_SELECTION ?? 'false').toLowerCase() === 'true',
-    worker: dependencies.worker || ejecutarColaWorker,
+    worker: dependencies.worker || ejecutarColaLegacy,
     logger: dependencies.logger || log,
     launchPersistentContext: dependencies.launchPersistentContext
       || ((...args) => chromium.launchPersistentContext(...args)),
@@ -1010,5 +1139,7 @@ if (require.main === module) {
 module.exports = {
   crearServidor,
   iniciarServidor,
+  ejecutarColaWorker,
+  normalizarErrorFacebook,
   buscarGruposParaRegion,
 };

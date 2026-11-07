@@ -1050,3 +1050,164 @@ test('persists an unknown composer classification as an unsupported warning', as
   assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).group_type, 'unknown');
   assert.equal(dependencies.catalogo.buscar(FIRST_GROUP_ID).validation_state, 'warning');
 });
+
+test('processes only the requested batch and persists publishing transitions before outcomes', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID, SECOND_GROUP_ID]);
+  const batchA = BATCH_UUID;
+  const batchB = '223e4567-e89b-42d3-a456-426614174001';
+  dependencies.cola.encolarLote({
+    batch: { batch_uuid: batchA, lead_id: 2212 },
+    items: [
+      crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY),
+      crearGrupoV2(SECOND_GROUP_ID, SECOND_KEY),
+    ].map((group) => ({
+      ...group,
+      grupo: group.url,
+      campaign_revision: 1,
+      copy: 'Copy de prueba del batch A',
+    })),
+  });
+  dependencies.cola.encolarLote({
+    batch: { batch_uuid: batchB, lead_id: 2213 },
+    items: [{
+      ...crearGrupoV2(FIRST_GROUP_ID, `sha256:${'2'.repeat(64)}`),
+      grupo: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+      campaign_revision: 1,
+      copy: 'Copy de prueba del batch B',
+    }],
+  });
+
+  const events = [];
+  const originalActualizarItem = dependencies.cola.actualizarItem;
+  dependencies.cola.actualizarItem = (...args) => {
+    events.push({ id: args[1], state: args[2] });
+    return originalActualizarItem(...args);
+  };
+  let publishCalls = 0;
+  let closed = false;
+
+  const result = await captacion.ejecutarColaWorker({
+    batchUuid: batchA,
+    cola: dependencies.cola,
+    crearContexto: async () => ({
+      newPage: async () => ({ page: true }),
+      close: async () => { closed = true; },
+    }),
+    publicar: async () => {
+      publishCalls += 1;
+      if (publishCalls === 1) return { permalink: 'https://facebook.example/post/1' };
+      const error = new Error('composer is buy_sell');
+      error.code = 'unsupported_composer';
+      throw error;
+    },
+  });
+
+  assert.deepEqual(events.map((event) => event.state), [
+    'publishing', 'published', 'publishing', 'error',
+  ]);
+  assert.equal(publishCalls, 2);
+  assert.equal(closed, true);
+  assert.deepEqual(result, { procesados: 2, exitosos: 1, fallidos: 1 });
+  assert.equal(dependencies.cola.resumirBatch(dependencies.cola.leerCola(), batchB).counts.queued, 1);
+  assert.equal(dependencies.cola.resumirBatch(dependencies.cola.leerCola(), batchA).counts.error, 1);
+
+  const failedItem = dependencies.cola.resumirBatch(dependencies.cola.leerCola(), batchA).items[1];
+  assert.equal(failedItem.error_code, 'unsupported_composer');
+  assert.equal(failedItem.error_message, 'composer is buy_sell');
+});
+
+test('stops the requested batch on session expiration without touching other items or batches', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID, SECOND_GROUP_ID]);
+  const batchA = BATCH_UUID;
+  const batchB = '323e4567-e89b-42d3-a456-426614174002';
+  dependencies.cola.encolarLote({
+    batch: { batch_uuid: batchA, lead_id: 2212 },
+    items: [
+      crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY),
+      crearGrupoV2(SECOND_GROUP_ID, SECOND_KEY),
+    ].map((group) => ({
+      ...group,
+      grupo: group.url,
+      campaign_revision: 1,
+      copy: 'Copy A',
+    })),
+  });
+  dependencies.cola.encolarLote({
+    batch: { batch_uuid: batchB, lead_id: 2213 },
+    items: [{
+      ...crearGrupoV2(FIRST_GROUP_ID, `sha256:${'3'.repeat(64)}`),
+      grupo: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+      campaign_revision: 1,
+      copy: 'Copy B',
+    }],
+  });
+
+  let publishCalls = 0;
+  const result = await captacion.ejecutarColaWorker({
+    batchUuid: batchA,
+    cola: dependencies.cola,
+    crearContexto: async () => ({
+      newPage: async () => ({}),
+      close: async () => {},
+    }),
+    publicar: async () => {
+      publishCalls += 1;
+      throw new Error('Your session has expired');
+    },
+  });
+
+  assert.equal(publishCalls, 1);
+  assert.deepEqual(result, { procesados: 1, exitosos: 0, fallidos: 1 });
+  const data = dependencies.cola.leerCola();
+  const summaryA = dependencies.cola.resumirBatch(data, batchA);
+  assert.equal(summaryA.counts.error, 1);
+  assert.equal(summaryA.counts.queued, 1);
+  assert.equal(dependencies.cola.resumirBatch(data, batchB).counts.queued, 1);
+  assert.equal(summaryA.items[0].error_code, 'session_expired');
+});
+
+test('normalizes supported Facebook publishing failures into stable error codes', () => {
+  const cases = [
+    ['Your session has expired', 'session_expired'],
+    ['Checkpoint required', 'checkpoint_detected'],
+    ['You are not a member of this group', 'membership_not_confirmed'],
+    ['Sell Something composer', 'unsupported_composer'],
+    ['Questionnaire required', 'questionnaire'],
+    ['No se localizó la caja de nueva publicación', 'composer_not_found'],
+    ['Navigation timeout 45000ms exceeded', 'navigation_timeout'],
+    ['unexpected Facebook failure', 'unknown'],
+  ];
+
+  for (const [message, code] of cases) {
+    const normalized = captacion.normalizarErrorFacebook(new Error(message));
+    assert.deepEqual(normalized, { error_code: code, error_message: message }, message);
+  }
+});
+
+test('does not recover publishing items into queued state after a worker restart', async (t) => {
+  const dependencies = crearDependenciasV2(t, [FIRST_GROUP_ID]);
+  dependencies.cola.encolarLote({
+    batch: { batch_uuid: BATCH_UUID, lead_id: 2212 },
+    items: [{
+      ...crearGrupoV2(FIRST_GROUP_ID, FIRST_KEY),
+      grupo: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
+      campaign_revision: 1,
+      copy: 'Copy interrupted',
+    }],
+  });
+  const data = dependencies.cola.leerCola();
+  dependencies.cola.actualizarItem(data, data.items[0].id, 'publishing', {
+    publishing_at: '2026-11-06T20:00:00.000Z',
+  });
+
+  const result = await captacion.ejecutarColaWorker({
+    batchUuid: BATCH_UUID,
+    cola: dependencies.cola,
+    crearContexto: async () => {
+      throw new Error('context must not open for recovered publishing item');
+    },
+  });
+
+  assert.deepEqual(result, { procesados: 0 });
+  assert.equal(dependencies.cola.leerCola().items[0].estado, 'publishing');
+});
