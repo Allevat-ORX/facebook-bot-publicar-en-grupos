@@ -668,3 +668,122 @@ test('accepts 30 explicit v2 groups without applying LIMITE_TANDA', async (t) =>
   assert.equal(response.body.items.length, 30);
   assert.equal(dependencies.cola.leerCola().items.length, 30);
 });
+
+test('accepts exactly 63206 copy code points and rejects the next one', async (t) => {
+  const dependencies = crearDependenciasV2(t);
+  const listener = await abrirServidor(t, dependencies);
+
+  const accepted = await solicitarJsonFirmado(
+    listener.baseUrl,
+    '/api/sondeo/dispatch',
+    crearPayloadV2({ copy: 'x'.repeat(63206) }),
+  );
+  const rejected = await solicitarJsonFirmado(
+    listener.baseUrl,
+    '/api/sondeo/dispatch',
+    crearPayloadV2({
+      batch_uuid: '223e4567-e89b-42d3-a456-426614174001',
+      copy: 'x'.repeat(63207),
+    }),
+  );
+
+  assert.equal(accepted.status, 202);
+  assert.equal(rejected.status, 400);
+  assert.equal(rejected.body.error, 'invalid_payload');
+  assert.equal(dependencies.cola.leerCola().items.length, 1);
+});
+
+test('counts Unicode code points instead of UTF-16 code units for copy limits', async (t) => {
+  const dependencies = crearDependenciasV2(t);
+  const listener = await abrirServidor(t, dependencies);
+  const emoji = '😀';
+
+  const accepted = await solicitarJsonFirmado(
+    listener.baseUrl,
+    '/api/sondeo/dispatch',
+    crearPayloadV2({ copy: emoji.repeat(63206) }),
+  );
+  const rejected = await solicitarJsonFirmado(
+    listener.baseUrl,
+    '/api/sondeo/dispatch',
+    crearPayloadV2({
+      batch_uuid: '223e4567-e89b-42d3-a456-426614174001',
+      copy: emoji.repeat(63207),
+    }),
+  );
+
+  assert.equal(accepted.status, 202);
+  assert.equal(rejected.status, 400);
+  assert.equal(rejected.body.error, 'invalid_payload');
+  assert.equal(dependencies.cola.leerCola().items.length, 1);
+});
+
+test('uses MAX_COPY_CODE_POINTS from the environment', async (t) => {
+  const previousLimit = process.env.MAX_COPY_CODE_POINTS;
+  process.env.MAX_COPY_CODE_POINTS = '3';
+
+  try {
+    const dependencies = crearDependenciasV2(t);
+    const listener = await abrirServidor(t, dependencies);
+    const accepted = await solicitarJsonFirmado(
+      listener.baseUrl,
+      '/api/sondeo/dispatch',
+      crearPayloadV2({ copy: 'abc' }),
+    );
+    const rejected = await solicitarJsonFirmado(
+      listener.baseUrl,
+      '/api/sondeo/dispatch',
+      crearPayloadV2({
+        batch_uuid: '223e4567-e89b-42d3-a456-426614174001',
+        copy: 'abcd',
+        groups: [crearGrupoV2(FIRST_GROUP_ID, SECOND_KEY)],
+      }),
+    );
+
+    assert.equal(accepted.status, 202);
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.error, 'invalid_payload');
+    assert.equal(dependencies.cola.leerCola().items.length, 1);
+  } finally {
+    restaurarVariableEntorno('MAX_COPY_CODE_POINTS', previousLimit);
+  }
+});
+
+test('fails closed when MAX_COPY_CODE_POINTS is invalid', () => {
+  const previousLimit = process.env.MAX_COPY_CODE_POINTS;
+  const invalidValues = ['0', '-1', '1.5', '9007199254740992', 'not-a-number'];
+
+  try {
+    for (const invalidValue of invalidValues) {
+      process.env.MAX_COPY_CODE_POINTS = invalidValue;
+      assert.throws(
+        () => captacion.crearServidor({ hmacSecret: HMAC_SECRET }),
+        /MAX_COPY_CODE_POINTS must be a positive integer/,
+        invalidValue,
+      );
+    }
+  } finally {
+    restaurarVariableEntorno('MAX_COPY_CODE_POINTS', previousLimit);
+  }
+});
+
+test('rejects an idempotency key reused by another batch without mutating the queue', async (t) => {
+  const dependencies = crearDependenciasV2(t);
+  const listener = await abrirServidor(t, dependencies);
+  const pathname = '/api/sondeo/dispatch';
+  const firstPayload = crearPayloadV2({
+    batch_uuid: '323e4567-e89b-42d3-a456-426614174002',
+  });
+  const secondPayload = crearPayloadV2({
+    batch_uuid: '423e4567-e89b-42d3-a456-426614174003',
+  });
+
+  const first = await solicitarJsonFirmado(listener.baseUrl, pathname, firstPayload);
+  const queueAfterFirst = JSON.stringify(dependencies.cola.leerCola());
+  const conflict = await solicitarJsonFirmado(listener.baseUrl, pathname, secondPayload);
+
+  assert.equal(first.status, 202);
+  assert.equal(conflict.status, 409);
+  assert.deepEqual(conflict.body, { error: 'idempotency_key_conflict' });
+  assert.equal(JSON.stringify(dependencies.cola.leerCola()), queueAfterFirst);
+});

@@ -31,7 +31,7 @@ const HEADLESS = String(process.env.HEADLESS ?? 'true').toLowerCase() !== 'false
 const MODO_ASISTIDO = String(process.env.MODO_ASISTIDO ?? 'false').toLowerCase() === 'true';
 const MOCK_WORKER = String(process.env.MOCK_WORKER ?? 'false').toLowerCase() === 'true';
 const LIMITE_TANDA = parseInt(process.env.LIMITE_TANDA || '5', 10);
-const MAX_COPY_LENGTH = 63206;
+const DEFAULT_MAX_COPY_CODE_POINTS = 63206;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const SESSION_PATH = process.env.FB_SESSION_DIR || path.join(__dirname, 'facebook-session');
@@ -158,7 +158,7 @@ function esContratoLegacy(payload) {
   );
 }
 
-function validarPayloadV2(payload, catalogo) {
+function validarPayloadV2(payload, catalogo, maxCopyCodePoints) {
   const errores = [];
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return ['payload debe ser un objeto'];
@@ -172,8 +172,8 @@ function validarPayloadV2(payload, catalogo) {
   }
   if (typeof payload.copy !== 'string' || payload.copy.trim().length === 0) {
     errores.push('copy debe ser un string no vacío');
-  } else if (payload.copy.length > MAX_COPY_LENGTH) {
-    errores.push(`copy no puede superar ${MAX_COPY_LENGTH} caracteres`);
+  } else if (Array.from(payload.copy).length > maxCopyCodePoints) {
+    errores.push(`copy no puede superar ${maxCopyCodePoints} puntos de código Unicode`);
   }
 
   if (!Array.isArray(payload.groups) || payload.groups.length < 1 || payload.groups.length > 30) {
@@ -517,6 +517,7 @@ async function manejarPeticion(req, res, deps) {
     enableLegacyGroupSelection,
     worker,
     logger,
+    maxCopyCodePoints,
   } = deps;
 
   const corsPermitido = aplicarCors(req, res, allowedOrigins);
@@ -608,7 +609,7 @@ async function manejarPeticion(req, res, deps) {
       }
 
       if (!esContratoLegacy(payload)) {
-        const errores = validarPayloadV2(payload, catalogo);
+        const errores = validarPayloadV2(payload, catalogo, maxCopyCodePoints);
         if (errores.length > 0) {
           enviarJSON(res, 400, { error: 'invalid_payload', details: errores });
           return;
@@ -873,6 +874,11 @@ function crearServidor(dependencies = {}) {
     'REQUEST_BODY_LIMIT_BYTES',
     1,
   );
+  const maxCopyCodePoints = validarEnteroConfiguracion(
+    dependencies.maxCopyCodePoints ?? process.env.MAX_COPY_CODE_POINTS ?? DEFAULT_MAX_COPY_CODE_POINTS,
+    'MAX_COPY_CODE_POINTS',
+    1,
+  );
 
   const deps = {
     ...dependencies,
@@ -888,6 +894,7 @@ function crearServidor(dependencies = {}) {
     logger: dependencies.logger || log,
     now,
     maxBodyBytes,
+    maxCopyCodePoints,
     allowedOrigins: normalizarOrigenesPermitidos(
       dependencies.allowedOrigins ?? process.env.CORS_ALLOWED_ORIGINS,
     ),
