@@ -84,7 +84,14 @@ ONRENTX_HMAC_SECRET=validation-only-not-production docker compose config
 docker compose build
 ```
 
-`docker compose config` debe mostrar `./data:/app/data`, `COLA_PATH=/app/data/cola.json`, `CATALOGO_PATH=/app/data/catalogo_grupos.json`, los límites aprobados y la imagen de Playwright con la misma versión que `package-lock.json`. La imagen y la librería usan Playwright `1.60.0`.
+`docker compose config` verifica la configuración renderizada, incluidos `./data:/app/data`, `COLA_PATH`, `CATALOGO_PATH` y los límites. No permite verificar el `FROM` del Dockerfile. Comprueba la versión declarada en el Dockerfile con una inspección separada y después valida el build:
+
+```bash
+node -e "const p=require('./package-lock.json'); const v=p.packages['node_modules/playwright'].version; const d=require('fs').readFileSync('Dockerfile','utf8'); if(!d.includes(v)) process.exit(1)"
+docker compose build
+```
+
+El chequeo anterior inspecciona el `Dockerfile`; `docker compose build` confirma que la imagen se puede construir desde ese Dockerfile. La imagen y la librería usan Playwright `1.60.0`.
 
 ### Docker Compose
 
@@ -126,12 +133,17 @@ No actives Compose y systemd para el mismo directorio de datos. Antes de cambiar
 
 ### Backup de cola y rollout compatible
 
-Haz el backup con el servicio detenido o coordinando una ventana sin escrituras. Conserva la copia junto con la unidad anterior:
+Haz el backup con el servicio detenido o coordinando una ventana sin escrituras. El proceso systemd corre como `ubuntu`; crea el directorio de datos con ese propietario y modo `0700`, y conserva la copia junto con la unidad anterior:
 
 ```bash
-sudo install -d -m 750 /opt/onrentx-captacion-facebook/backups
-sudo cp --preserve=mode /opt/onrentx-captacion-facebook/data/cola.json "/opt/onrentx-captacion-facebook/backups/cola.json.$(date -u +%Y%m%dT%H%M%SZ)"
-sudo cp --preserve=mode /etc/systemd/system/onrentx-captacion.service "/opt/onrentx-captacion-facebook/backups/onrentx-captacion.service.$(date -u +%Y%m%dT%H%M%SZ)"
+sudo install -d -o ubuntu -g ubuntu -m 0700 /opt/onrentx-captacion-facebook/data
+sudo install -d -o ubuntu -g ubuntu -m 0700 /opt/onrentx-captacion-facebook/backups
+backup_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+sudo install -o ubuntu -g ubuntu -m 0600 /opt/onrentx-captacion-facebook/data/cola.json "/opt/onrentx-captacion-facebook/backups/cola.json.${backup_timestamp}"
+sudo install -o ubuntu -g ubuntu -m 0600 /opt/onrentx-captacion-facebook/data/catalogo_grupos.json "/opt/onrentx-captacion-facebook/backups/catalogo_grupos.json.${backup_timestamp}"
+sudo install -o ubuntu -g ubuntu -m 0644 /etc/systemd/system/onrentx-captacion.service "/opt/onrentx-captacion-facebook/backups/onrentx-captacion.service.${backup_timestamp}"
+sudo -u ubuntu test -r "/opt/onrentx-captacion-facebook/backups/cola.json.${backup_timestamp}"
+sudo -u ubuntu test -r "/opt/onrentx-captacion-facebook/backups/catalogo_grupos.json.${backup_timestamp}"
 ```
 
 El rollout recomendado mantiene `ENABLE_LEGACY_GROUP_SELECTION=true`: despliega el servidor, valida `/health`, cambia los clientes al contrato v2 y confirma que no quedan consumidores legacy. Solo después desactiva el contrato antiguo de forma coordinada. Las versiones anteriores del cliente siguen firmando con el mismo HMAC durante la transición.
@@ -161,25 +173,40 @@ En Compose, cambia `ENABLE_LEGACY_GROUP_SELECTION` a `"false"` en `docker-compos
 
 ### Rollback
 
-Si el health check falla o el cliente compatible no puede completar el rollout, detén el servicio nuevo y restaura la unidad previamente respaldada. Ejecuta la restauración de la cola solo si la unidad anterior necesita esos bytes y siempre con todos los escritores detenidos:
+Si el health check falla o el cliente compatible no puede completar el rollout, detén el servicio nuevo y restaura la unidad previamente respaldada. Ejecuta la restauración de los JSON solo si la unidad anterior necesita esos bytes y siempre con todos los escritores detenidos:
 
 ```bash
 sudo systemctl stop onrentx-captacion.service
-sudo cp --preserve=mode /opt/onrentx-captacion-facebook/backups/onrentx-captacion.service.PREVIOUS /etc/systemd/system/onrentx-captacion.service
+sudo install -o root -g root -m 0644 /opt/onrentx-captacion-facebook/backups/onrentx-captacion.service.PREVIOUS /etc/systemd/system/onrentx-captacion.service
+
+restore_json() {
+  local backup="$1"
+  local target="$2"
+  local temporary
+  temporary="$(sudo mktemp "${target}.rollback.XXXXXX")"
+  sudo install -o ubuntu -g ubuntu -m 0600 "$backup" "$temporary"
+  sudo chown ubuntu:ubuntu "$temporary"
+  sudo -u ubuntu test -r "$temporary"
+  sudo -u ubuntu node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$temporary"
+  sudo mv -f "$temporary" "$target"
+  sudo chown ubuntu:ubuntu "$target"
+  sudo chmod 0600 "$target"
+  sudo -u ubuntu test -r "$target"
+  sudo -u ubuntu node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$target"
+}
+
+restore_json \
+  /opt/onrentx-captacion-facebook/backups/cola.json.TIMESTAMP \
+  /opt/onrentx-captacion-facebook/data/cola.json
+restore_json \
+  /opt/onrentx-captacion-facebook/backups/catalogo_grupos.json.TIMESTAMP \
+  /opt/onrentx-captacion-facebook/data/catalogo_grupos.json
 sudo systemctl daemon-reload
 sudo systemctl start onrentx-captacion.service
 curl --fail http://127.0.0.1:4599/health
 ```
 
-Para restaurar una cola concreta desde una copia verificada:
-
-```bash
-sudo systemctl stop onrentx-captacion.service
-sudo cp --preserve=mode /opt/onrentx-captacion-facebook/backups/cola.json.TIMESTAMP /opt/onrentx-captacion-facebook/data/cola.json
-sudo systemctl start onrentx-captacion.service
-```
-
-`PREVIOUS` y `TIMESTAMP` son marcadores que debes sustituir por nombres reales. No borres la cola actual ni fuerces un rename sin conservar primero la copia. El rollback vuelve al contrato y a la unidad anteriores; no debe ejecutarse junto con el despliegue nuevo.
+`PREVIOUS` y `TIMESTAMP` son marcadores que debes sustituir por nombres reales. La copia temporal se crea en el mismo directorio, se asigna a `ubuntu:ubuntu`, se verifica como legible y se mueve de forma atómica. No borres los JSON actuales ni fuerces un rename sin conservar primero la copia. El rollback vuelve al contrato y a la unidad anteriores; no debe ejecutarse junto con el despliegue nuevo.
 
 ## Configuración legacy local
 

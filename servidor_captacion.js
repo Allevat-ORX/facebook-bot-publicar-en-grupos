@@ -33,6 +33,7 @@ const MODO_ASISTIDO = String(process.env.MODO_ASISTIDO ?? 'false').toLowerCase()
 const MOCK_WORKER = String(process.env.MOCK_WORKER ?? 'false').toLowerCase() === 'true';
 const LIMITE_TANDA = parseInt(process.env.LIMITE_TANDA || '5', 10);
 const DEFAULT_MAX_COPY_CODE_POINTS = 63206;
+const DEFAULT_MAX_GROUPS_PER_BATCH = 30;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const SESSION_PATH = process.env.FB_SESSION_DIR || path.join(__dirname, 'facebook-session');
@@ -159,7 +160,7 @@ function esContratoLegacy(payload) {
   );
 }
 
-function validarPayloadV2(payload, catalogo, maxCopyCodePoints) {
+function validarPayloadV2(payload, catalogo, maxCopyCodePoints, maxGroupsPerBatch) {
   const errores = [];
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return ['payload debe ser un objeto'];
@@ -177,8 +178,8 @@ function validarPayloadV2(payload, catalogo, maxCopyCodePoints) {
     errores.push(`copy no puede superar ${maxCopyCodePoints} puntos de código Unicode`);
   }
 
-  if (!Array.isArray(payload.groups) || payload.groups.length < 1 || payload.groups.length > 30) {
-    errores.push('groups debe contener entre 1 y 30 grupos');
+  if (!Array.isArray(payload.groups) || payload.groups.length < 1 || payload.groups.length > maxGroupsPerBatch) {
+    errores.push(`groups debe contener entre 1 y ${maxGroupsPerBatch} grupos`);
     return errores;
   }
 
@@ -650,6 +651,7 @@ async function manejarPeticion(req, res, deps) {
     worker,
     logger,
     maxCopyCodePoints,
+    maxGroupsPerBatch,
     launchPersistentContext,
     sessionPath,
     validateGroup,
@@ -817,7 +819,7 @@ async function manejarPeticion(req, res, deps) {
       }
 
       if (!esContratoLegacy(payload)) {
-        const errores = validarPayloadV2(payload, catalogo, maxCopyCodePoints);
+        const errores = validarPayloadV2(payload, catalogo, maxCopyCodePoints, maxGroupsPerBatch);
         if (errores.length > 0) {
           enviarJSON(res, 400, { error: 'invalid_payload', details: errores });
           return;
@@ -873,20 +875,28 @@ async function manejarPeticion(req, res, deps) {
         auto_start = true,
       } = payload;
 
+      if (Array.isArray(groups) && groups.length > maxGroupsPerBatch) {
+        enviarJSON(res, 400, {
+          error: 'invalid_payload',
+          details: [`groups debe contener entre 1 y ${maxGroupsPerBatch} grupos`],
+        });
+        return;
+      }
+
       if (!lead_id) {
         enviarJSON(res, 400, { error: 'El campo "lead_id" es obligatorio' });
         return;
       }
 
-      // 1. Determinar grupos destino
+      const limiteSeleccionLegacy = Math.min(LIMITE_TANDA, maxGroupsPerBatch);
       let gruposDestino = Array.isArray(groups) && groups.length > 0
         ? groups
-        : buscarGruposParaRegion(region, LIMITE_TANDA);
+        : buscarGruposParaRegion(region, limiteSeleccionLegacy);
 
       if (gruposDestino.length === 0) {
         // Fallback a grupos base
         const gruposBase = require('./grupos');
-        gruposDestino = gruposBase.slice(0, LIMITE_TANDA);
+        gruposDestino = gruposBase.slice(0, limiteSeleccionLegacy);
       }
 
       // 2. Redactar copy si viene vacío
@@ -1087,6 +1097,11 @@ function crearServidor(dependencies = {}) {
     'MAX_COPY_CODE_POINTS',
     1,
   );
+  const maxGroupsPerBatch = validarEnteroConfiguracion(
+    dependencies.maxGroupsPerBatch ?? process.env.MAX_GROUPS_PER_BATCH ?? DEFAULT_MAX_GROUPS_PER_BATCH,
+    'MAX_GROUPS_PER_BATCH',
+    1,
+  );
 
   const deps = {
     ...dependencies,
@@ -1109,6 +1124,7 @@ function crearServidor(dependencies = {}) {
     now,
     maxBodyBytes,
     maxCopyCodePoints,
+    maxGroupsPerBatch,
     allowedOrigins: normalizarOrigenesPermitidos(
       dependencies.allowedOrigins ?? process.env.CORS_ALLOWED_ORIGINS,
     ),

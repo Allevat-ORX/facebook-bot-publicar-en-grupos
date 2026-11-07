@@ -767,6 +767,87 @@ test('fails closed when MAX_COPY_CODE_POINTS is invalid', () => {
   }
 });
 
+test('fails closed when MAX_GROUPS_PER_BATCH is invalid', () => {
+  const previousLimit = process.env.MAX_GROUPS_PER_BATCH;
+  const invalidValues = ['0', '-1', '1.5', '9007199254740992', 'not-a-number'];
+
+  try {
+    for (const invalidValue of invalidValues) {
+      process.env.MAX_GROUPS_PER_BATCH = invalidValue;
+      assert.throws(
+        () => captacion.crearServidor({ hmacSecret: HMAC_SECRET }),
+        /MAX_GROUPS_PER_BATCH must be a positive integer/,
+        invalidValue,
+      );
+    }
+  } finally {
+    restaurarVariableEntorno('MAX_GROUPS_PER_BATCH', previousLimit);
+  }
+});
+
+test('rejects v2 batches above the configured MAX_GROUPS_PER_BATCH', async (t) => {
+  const previousLimit = process.env.MAX_GROUPS_PER_BATCH;
+  process.env.MAX_GROUPS_PER_BATCH = '2';
+  const groupIds = ['700000000000001', '700000000000002', '700000000000003'];
+
+  try {
+    const dependencies = crearDependenciasV2(t, groupIds);
+    const listener = await abrirServidor(t, dependencies);
+    const response = await solicitarJsonFirmado(
+      listener.baseUrl,
+      '/api/sondeo/dispatch',
+      crearPayloadV2({
+        groups: groupIds.map((facebookGroupId, index) => crearGrupoV2(
+          facebookGroupId,
+          `sha256:${index.toString(16).padStart(64, '0')}`,
+        )),
+      }),
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error, 'invalid_payload');
+    assert.ok(response.body.details.includes('groups debe contener entre 1 y 2 grupos'));
+    assert.equal(fs.existsSync(dependencies.queuePath), false);
+  } finally {
+    restaurarVariableEntorno('MAX_GROUPS_PER_BATCH', previousLimit);
+  }
+});
+
+test('rejects legacy explicit groups above the configured MAX_GROUPS_PER_BATCH', async (t) => {
+  const previousLimit = process.env.MAX_GROUPS_PER_BATCH;
+  process.env.MAX_GROUPS_PER_BATCH = '2';
+  const queue = crearColaFake();
+  const listener = await abrirServidor(t, {
+    cola: queue,
+    enableLegacyGroupSelection: true,
+  });
+
+  try {
+    const response = await solicitarJsonFirmado(
+      listener.baseUrl,
+      '/api/sondeo/dispatch',
+      {
+        lead_id: 2212,
+        groups: [
+          'https://www.facebook.com/groups/1/',
+          'https://www.facebook.com/groups/2/',
+          'https://www.facebook.com/groups/3/',
+        ],
+        auto_start: false,
+      },
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(response.body, {
+      error: 'invalid_payload',
+      details: ['groups debe contener entre 1 y 2 grupos'],
+    });
+    assert.equal(queue.enqueueCalls, 0);
+  } finally {
+    restaurarVariableEntorno('MAX_GROUPS_PER_BATCH', previousLimit);
+  }
+});
+
 test('rejects an idempotency key reused by another batch without mutating the queue', async (t) => {
   const dependencies = crearDependenciasV2(t);
   const listener = await abrirServidor(t, dependencies);
