@@ -23,12 +23,20 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 const cola = require('./cola');
+const { crearVerificador } = require('./auth');
+const { crearCatalogo, normalizarGrupoFacebook } = require('./catalogo');
+const { validarGrupoFacebook } = require('./facebook_validation');
 
 const PORT = parseInt(process.env.PORT || '4599', 10);
 const HEADLESS = String(process.env.HEADLESS ?? 'true').toLowerCase() !== 'false';
 const MODO_ASISTIDO = String(process.env.MODO_ASISTIDO ?? 'false').toLowerCase() === 'true';
 const MOCK_WORKER = String(process.env.MOCK_WORKER ?? 'false').toLowerCase() === 'true';
 const LIMITE_TANDA = parseInt(process.env.LIMITE_TANDA || '5', 10);
+const DEFAULT_MAX_COPY_CODE_POINTS = 63206;
+const DEFAULT_MAX_GROUPS_PER_BATCH = 30;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IDEMPOTENCY_KEY_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const FACEBOOK_GROUP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 const SESSION_PATH = process.env.FB_SESSION_DIR || path.join(__dirname, 'facebook-session');
 
 let isWorkerBusy = false;
@@ -57,16 +65,210 @@ function enviarJSON(res, code, obj) {
   res.end(body);
 }
 
-function leerBody(req) {
+function enviarError(res, status, errorCode, extra = {}) {
+  enviarJSON(res, status, { error_code: errorCode, error: errorCode, ...extra });
+}
+
+function crearErrorPayloadDemasiadoGrande() {
+  const error = new Error('payload_too_large');
+  error.statusCode = 413;
+  return error;
+}
+
+function leerBody(req, maxBytes) {
   return new Promise((resolve, reject) => {
-    let data = '';
+    const contentLength = Number(req.headers['content-length']);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      req.resume();
+      reject(crearErrorPayloadDemasiadoGrande());
+      return;
+    }
+
+    const chunks = [];
+    let bytesRecibidos = 0;
+    let terminado = false;
+
     req.on('data', (chunk) => {
-      data += chunk;
-      if (data.length > 2e6) req.destroy(); // Límite de 2MB
+      if (terminado) return;
+      bytesRecibidos += chunk.length;
+      if (bytesRecibidos > maxBytes) {
+        terminado = true;
+        reject(crearErrorPayloadDemasiadoGrande());
+        return;
+      }
+      chunks.push(chunk);
     });
-    req.on('end', () => resolve(data));
-    req.on('error', reject);
+    req.on('end', () => {
+      if (!terminado) resolve(Buffer.concat(chunks).toString('utf8'));
+    });
+    req.on('error', (error) => {
+      if (!terminado) {
+        terminado = true;
+        reject(error);
+      }
+    });
   });
+}
+
+function normalizarOrigenesPermitidos(value) {
+  const origins = Array.isArray(value) ? value : String(value || '').split(',');
+  return origins.map((origin) => origin.trim()).filter(Boolean);
+}
+
+function validarEnteroConfiguracion(value, name, minimum) {
+  const parsed = typeof value === 'string' && value.trim() === '' ? NaN : Number(value);
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < minimum) {
+    const range = minimum === 0 ? 'a non-negative integer' : 'a positive integer';
+    throw new Error(`${name} must be ${range}`);
+  }
+  return parsed;
+}
+
+function aplicarCors(req, res, allowedOrigins) {
+  const origin = req.headers.origin;
+  if (!origin || !allowedOrigins.includes(origin)) return false;
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, X-OnRentX-Timestamp, X-OnRentX-Nonce, X-OnRentX-Signature',
+  );
+  return true;
+}
+
+function requiereFirma(method, pathname) {
+  return pathname.startsWith('/api/') && (method === 'GET' || method === 'POST');
+}
+
+function verificarFirma(req, pathname, rawBody, verificador) {
+  return verificador.verificar({
+    timestamp: req.headers['x-onrentx-timestamp'],
+    nonce: req.headers['x-onrentx-nonce'],
+    signature: req.headers['x-onrentx-signature'],
+    method: req.method,
+    pathname,
+    rawBody,
+  });
+}
+
+function esDireccionLocal(address = '') {
+  return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
+}
+
+function esContratoLegacy(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  if (payload.batch_uuid !== undefined) return false;
+  return payload.groups === undefined || (
+    Array.isArray(payload.groups) && payload.groups.every((group) => typeof group === 'string')
+  );
+}
+
+function validarPayloadV2(payload, catalogo, maxCopyCodePoints, maxGroupsPerBatch) {
+  const errores = [];
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return ['payload debe ser un objeto'];
+  }
+
+  if (typeof payload.batch_uuid !== 'string' || !UUID_PATTERN.test(payload.batch_uuid)) {
+    errores.push('batch_uuid debe ser un UUID válido');
+  }
+  if (!Number.isSafeInteger(payload.lead_id) || payload.lead_id <= 0) {
+    errores.push('lead_id debe ser un entero positivo');
+  }
+  if (typeof payload.copy !== 'string' || payload.copy.trim().length === 0) {
+    errores.push('copy debe ser un string no vacío');
+  } else if (Array.from(payload.copy).length > maxCopyCodePoints) {
+    errores.push(`copy no puede superar ${maxCopyCodePoints} puntos de código Unicode`);
+  }
+
+  if (!Array.isArray(payload.groups) || payload.groups.length < 1 || payload.groups.length > maxGroupsPerBatch) {
+    errores.push(`groups debe contener entre 1 y ${maxGroupsPerBatch} grupos`);
+    return errores;
+  }
+
+  const ids = new Set();
+  const keys = new Set();
+  payload.groups.forEach((group, index) => {
+    const prefix = `groups[${index}]`;
+    if (!group || typeof group !== 'object' || Array.isArray(group)) {
+      errores.push(`${prefix} debe ser un objeto`);
+      return;
+    }
+
+    if (typeof group.facebook_group_id !== 'string' || !FACEBOOK_GROUP_ID_PATTERN.test(group.facebook_group_id)) {
+      errores.push(`${prefix}.facebook_group_id debe contener solo caracteres seguros`);
+    } else if (ids.has(group.facebook_group_id)) {
+      errores.push(`${prefix}.facebook_group_id está duplicado`);
+    } else {
+      ids.add(group.facebook_group_id);
+    }
+
+    if (typeof group.idempotency_key !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(group.idempotency_key)) {
+      errores.push(`${prefix}.idempotency_key debe tener formato sha256:<64 hex minúsculas>`);
+    } else if (keys.has(group.idempotency_key)) {
+      errores.push(`${prefix}.idempotency_key está duplicada`);
+    } else {
+      keys.add(group.idempotency_key);
+    }
+
+    const campaignRevision = group.campaign_revision === undefined ? 1 : group.campaign_revision;
+    if (!Number.isSafeInteger(campaignRevision) || campaignRevision <= 0) {
+      errores.push(`${prefix}.campaign_revision debe ser un entero positivo`);
+    } else if (
+      typeof group.idempotency_key === 'string'
+      && IDEMPOTENCY_KEY_PATTERN.test(group.idempotency_key)
+      && group.idempotency_key !== cola.crearIdempotencyKey(payload.lead_id, group.facebook_group_id, campaignRevision)
+    ) {
+      errores.push(`${prefix}.idempotency_key no coincide con lead_id|facebook_group_id|campaign_revision`);
+    }
+
+    let normalizado;
+    try {
+      normalizado = normalizarGrupoFacebook(group.url);
+    } catch (_) {
+      errores.push(`${prefix}.url no es una URL canónica de grupo de Facebook`);
+      return;
+    }
+
+    if (
+      normalizado.facebook_group_id !== group.facebook_group_id
+      || normalizado.url !== group.url
+    ) {
+      errores.push(`${prefix}.url no coincide exactamente con facebook_group_id`);
+      return;
+    }
+
+    const destino = catalogo.buscar(group.facebook_group_id);
+    if (
+      !destino
+      || destino.url !== group.url
+      || !catalogo.esDestinoOperativo(destino)
+    ) {
+      errores.push(`${prefix} no es un destino operativo`);
+    }
+  });
+
+  return errores;
+}
+
+function respuestaDispatchV2(payload, result, colaActual) {
+  const existingIds = new Set(result.existing.map((item) => item.id));
+  return {
+    ok: true,
+    batch_uuid: payload.batch_uuid,
+    lead_id: payload.lead_id,
+    state: colaActual.resumirBatch(colaActual.leerCola(), payload.batch_uuid).state,
+    items: result.created.concat(result.existing).map((item) => ({
+      remote_item_id: item.id,
+      facebook_group_id: item.facebook_group_id,
+      idempotency_key: item.idempotency_key,
+      state: colaActual.estadoActual(item),
+      existing: existingIds.has(item.id),
+    })),
+    worker_started: false,
+  };
 }
 
 // ------------------------------------------------------------
@@ -229,7 +431,7 @@ async function publicarPostEnGrupo(page, grupoUrl, texto, opciones = {}) {
 // ------------------------------------------------------------
 // WORKER DE EJECUCIÓN DE COLA
 // ------------------------------------------------------------
-async function ejecutarColaWorker() {
+async function ejecutarColaLegacy() {
   if (isWorkerBusy) {
     log('Worker ya se encuentra en ejecución, omitiendo nuevo disparo concurrente');
     return { busy: true };
@@ -320,16 +522,163 @@ async function ejecutarColaWorker() {
   return { procesados: exitosos + fallidos, exitosos, fallidos };
 }
 
+function normalizarErrorFacebook(error) {
+  const errorMessage = error && error.message ? error.message : String(error || 'unknown');
+  const source = `${error?.code || ''} ${errorMessage}`.toLowerCase();
+  let errorCode = 'unknown';
+
+  if (source.includes('checkpoint') || source.includes('security check')) {
+    errorCode = 'checkpoint_detected';
+  } else if (
+    source.includes('session_expired')
+    || source.includes('session has expired')
+    || source.includes('sesión ha caducado')
+    || source.includes('login required')
+    || source.includes('iniciar sesión')
+    || source.includes('log in')
+    || source.includes('inicia sesión')
+  ) {
+    errorCode = 'session_expired';
+  } else if (
+    source.includes('not a member')
+    || source.includes('membership')
+    || source.includes('membership_not_confirmed')
+    || source.includes('join group')
+    || source.includes('unirse al grupo')
+  ) {
+    errorCode = 'not_member';
+  } else if (
+    source.includes('unsupported_composer')
+    || source.includes('buy_sell')
+    || source.includes('sell something')
+    || source.includes('vender algo')
+  ) {
+    errorCode = 'unsupported_composer';
+  } else if (
+    source.includes('questionnaire')
+    || source.includes('ask a question')
+    || source.includes('haz una pregunta')
+  ) {
+    errorCode = 'questionnaire_required';
+  } else if (
+    source.includes('composer_not_found')
+    || source.includes('no se localizó la caja')
+    || source.includes('no se encontró el editor')
+    || source.includes('no se localizó el botón publicar')
+  ) {
+    errorCode = 'composer_not_found';
+  } else if (
+    source.includes('navigation_timeout')
+    || source.includes('navigation timeout')
+    || source.includes('timeout')
+  ) {
+    errorCode = 'navigation_timeout';
+  }
+
+  return { error_code: errorCode, error_message: errorMessage };
+}
+
+function crearContextoFacebook() {
+  return chromium.launchPersistentContext(SESSION_PATH, {
+    headless: HEADLESS,
+    args: [
+      '--disable-notifications',
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+    ],
+    viewport: { width: 1280, height: 800 },
+  });
+}
+
+async function ejecutarColaWorker({
+  batchUuid,
+  cola: colaDependencia = cola,
+  crearContexto = crearContextoFacebook,
+  publicar = publicarPostEnGrupo,
+} = {}) {
+  if (isWorkerBusy) {
+    log('Worker ya se encuentra en ejecución, omitiendo nuevo disparo concurrente');
+    return { busy: true };
+  }
+  if (typeof batchUuid !== 'string' || batchUuid.length === 0 || !colaDependencia.existeCola()) {
+    return { procesados: 0 };
+  }
+
+  const dataCola = colaDependencia.leerCola();
+  const pendientes = colaDependencia.itemsProcesables(dataCola, { batchUuid });
+  if (pendientes.length === 0) return { procesados: 0 };
+
+  isWorkerBusy = true;
+  workerStats.lastRun = new Date().toISOString();
+  let context = null;
+  let exitosos = 0;
+  let fallidos = 0;
+
+  try {
+    context = await crearContexto();
+    const page = await context.newPage();
+
+    for (const item of pendientes) {
+      colaDependencia.actualizarItem(dataCola, item.id, 'publishing', {
+        publishing_at: new Date().toISOString(),
+      });
+      try {
+        const copy = item.copy || (Array.isArray(item.copies) ? item.copies[0] : '');
+        const result = await publicar(page, item.grupo, copy, { imagen: item.imagen });
+        colaDependencia.actualizarItem(dataCola, item.id, 'published', {
+          published_at: new Date().toISOString(),
+          permalink: result?.permalink || null,
+        });
+        exitosos++;
+        workerStats.totalPublished++;
+      } catch (error) {
+        const normalized = normalizarErrorFacebook(error);
+        colaDependencia.actualizarItem(dataCola, item.id, 'error', normalized);
+        fallidos++;
+        workerStats.totalErrors++;
+        workerStats.lastError = normalized.error_message;
+        if (normalized.error_code === 'session_expired') break;
+      }
+    }
+  } finally {
+    if (context) {
+      try {
+        await context.close();
+      } catch (_) {}
+    }
+    isWorkerBusy = false;
+  }
+
+  return { procesados: exitosos + fallidos, exitosos, fallidos };
+}
+
 // ------------------------------------------------------------
 // SERVIDOR HTTP NATIVO
 // ------------------------------------------------------------
-const server = http.createServer(async (req, res) => {
-  // CORS para permitir llamadas desde portal Odoo o apps internas
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+async function manejarPeticion(req, res, deps) {
+  const {
+    cola,
+    catalogo,
+    verificador,
+    maxBodyBytes,
+    allowedOrigins,
+    enableLegacyGroupSelection,
+    worker,
+    logger,
+    maxCopyCodePoints,
+    maxGroupsPerBatch,
+    launchPersistentContext,
+    sessionPath,
+    validateGroup,
+  } = deps;
 
+  const corsPermitido = aplicarCors(req, res, allowedOrigins);
   if (req.method === 'OPTIONS') {
+    if (!corsPermitido) {
+      enviarError(res, 403, 'origin_not_allowed');
+      return;
+    }
     res.writeHead(204);
     res.end();
     return;
@@ -337,6 +686,16 @@ const server = http.createServer(async (req, res) => {
 
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
+    let rawBody = '';
+
+    if (requiereFirma(req.method, url.pathname)) {
+      rawBody = await leerBody(req, maxBodyBytes);
+      const resultadoFirma = verificarFirma(req, url.pathname, rawBody, verificador);
+      if (!resultadoFirma.ok) {
+        enviarError(res, resultadoFirma.status, resultadoFirma.errorCode);
+        return;
+      }
+    }
 
     // GET /health
     if (req.method === 'GET' && url.pathname === '/health') {
@@ -349,6 +708,129 @@ const server = http.createServer(async (req, res) => {
         headless: HEADLESS,
         mock_mode: MOCK_WORKER,
       });
+      return;
+    }
+
+    // POST /api/groups/validate
+    if (req.method === 'POST' && url.pathname === '/api/groups/validate') {
+      let payload;
+      try {
+        payload = JSON.parse(rawBody);
+      } catch (_) {
+        enviarError(res, 400, 'invalid_json');
+        return;
+      }
+
+      if (
+        !payload
+        || typeof payload !== 'object'
+        || Array.isArray(payload)
+        || typeof payload.facebook_group_id !== 'string'
+        || typeof payload.url !== 'string'
+      ) {
+        enviarError(res, 400, 'invalid_group');
+        return;
+      }
+
+      let normalized;
+      try {
+        normalized = normalizarGrupoFacebook(payload.url);
+      } catch (_) {
+        enviarError(res, 400, 'invalid_facebook_group_url');
+        return;
+      }
+      if (normalized.facebook_group_id !== payload.facebook_group_id) {
+        enviarError(res, 400, 'facebook_group_mismatch');
+        return;
+      }
+
+      if (!catalogo.buscar(normalized.facebook_group_id)) {
+        if (typeof catalogo.crearGrupoProvisional !== 'function') {
+          enviarError(res, 404, 'facebook_group_not_found');
+          return;
+        }
+        try {
+          catalogo.crearGrupoProvisional({
+            facebook_group_id: normalized.facebook_group_id,
+            url: normalized.url,
+          });
+        } catch (_) {
+          enviarError(res, 400, 'invalid_group');
+          return;
+        }
+      }
+      if (isWorkerBusy) {
+        enviarError(res, 409, 'profile_busy');
+        return;
+      }
+
+      isWorkerBusy = true;
+      let context = null;
+      try {
+        context = await launchPersistentContext(sessionPath, {
+          headless: HEADLESS,
+          args: [
+            '--disable-notifications',
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+          ],
+          viewport: { width: 1280, height: 800 },
+        });
+        const page = await context.newPage();
+        let result;
+        try {
+          result = await validateGroup(page, {
+            facebook_group_id: normalized.facebook_group_id,
+            url: normalized.url,
+          });
+        } catch (_) {
+          result = {
+            facebook_group_id: normalized.facebook_group_id,
+            url: normalized.url,
+            membership_state: 'unknown',
+            group_type: 'unknown',
+            validation_state: 'invalid',
+            validated_at: new Date().toISOString(),
+            warning: 'navigation_error',
+          };
+        }
+        catalogo.guardarValidacion(result);
+        if (result.validation_state === 'invalid' && result.warning === 'navigation_error') {
+          enviarError(res, 502, 'validation_navigation_error');
+          return;
+        }
+        enviarJSON(res, 200, { ok: true, ...result });
+      } finally {
+        if (context) {
+          try {
+            await context.close();
+          } catch (_) {}
+        }
+        isWorkerBusy = false;
+      }
+      return;
+    }
+
+    // GET /api/batches/{batch_uuid}
+    const batchMatch = url.pathname.match(/^\/api\/batches\/([^/]+)$/);
+    if (req.method === 'GET' && batchMatch) {
+      const batchUuid = batchMatch[1];
+      if (!UUID_PATTERN.test(batchUuid)) {
+        enviarError(res, 400, 'invalid_batch_uuid');
+        return;
+      }
+      if (!cola.existeCola()) {
+        enviarError(res, 404, 'batch_not_found');
+        return;
+      }
+
+      const summary = cola.resumirBatch(cola.leerCola(), batchUuid);
+      if (summary.counts.total === 0) {
+        enviarError(res, 404, 'batch_not_found');
+        return;
+      }
+      enviarJSON(res, 200, summary);
       return;
     }
 
@@ -372,14 +854,58 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/sondeo/dispatch (Llamado desde Odoo Pre-Bidding Wizard)
     if (req.method === 'POST' && url.pathname === '/api/sondeo/dispatch') {
-      const raw = await leerBody(req);
       let payload;
       try {
-        payload = JSON.parse(raw);
+        payload = JSON.parse(rawBody);
       } catch (_) {
-        enviarJSON(res, 400, { error: 'Payload JSON inválido' });
+        enviarError(res, 400, 'invalid_json');
         return;
       }
+
+      if (!esContratoLegacy(payload)) {
+        const errores = validarPayloadV2(payload, catalogo, maxCopyCodePoints, maxGroupsPerBatch);
+        if (errores.length > 0) {
+          enviarError(res, 400, 'invalid_payload', { details: errores });
+          return;
+        }
+
+        let result;
+        try {
+          result = cola.encolarLote({
+            batch: {
+              batch_uuid: payload.batch_uuid,
+              lead_id: payload.lead_id,
+            },
+            items: payload.groups.map((group) => ({
+              facebook_group_id: group.facebook_group_id,
+              grupo: group.url,
+              idempotency_key: group.idempotency_key,
+              campaign_revision: group.campaign_revision === undefined ? 1 : group.campaign_revision,
+              copy: payload.copy,
+            })),
+          });
+        } catch (error) {
+          if (['BATCH_UUID_CONFLICT', 'IDEMPOTENCY_KEY_CONFLICT'].includes(error.code)) {
+            enviarError(res, 409, error.code.toLowerCase());
+            return;
+          }
+          if (error.code === 'INVALID_BATCH') {
+            enviarError(res, 400, 'invalid_payload');
+            return;
+          }
+          throw error;
+        }
+
+        logger(`contract=v2 batch=${payload.batch_uuid} groups=${payload.groups.length}`);
+        enviarJSON(res, 202, respuestaDispatchV2(payload, result, cola));
+        return;
+      }
+
+      if (!enableLegacyGroupSelection) {
+        enviarError(res, 400, 'legacy_contract_disabled');
+        return;
+      }
+      logger('contract=legacy');
 
       const {
         lead_id,
@@ -393,20 +919,27 @@ const server = http.createServer(async (req, res) => {
         auto_start = true,
       } = payload;
 
-      if (!lead_id) {
-        enviarJSON(res, 400, { error: 'El campo "lead_id" es obligatorio' });
+      if (Array.isArray(groups) && groups.length > maxGroupsPerBatch) {
+        enviarError(res, 400, 'invalid_payload', {
+          details: [`groups debe contener entre 1 y ${maxGroupsPerBatch} grupos`],
+        });
         return;
       }
 
-      // 1. Determinar grupos destino
+      if (!lead_id) {
+        enviarError(res, 400, 'lead_id_required');
+        return;
+      }
+
+      const limiteSeleccionLegacy = Math.min(LIMITE_TANDA, maxGroupsPerBatch);
       let gruposDestino = Array.isArray(groups) && groups.length > 0
         ? groups
-        : buscarGruposParaRegion(region, LIMITE_TANDA);
+        : buscarGruposParaRegion(region, limiteSeleccionLegacy);
 
       if (gruposDestino.length === 0) {
         // Fallback a grupos base
         const gruposBase = require('./grupos');
-        gruposDestino = gruposBase.slice(0, LIMITE_TANDA);
+        gruposDestino = gruposBase.slice(0, limiteSeleccionLegacy);
       }
 
       // 2. Redactar copy si viene vacío
@@ -435,16 +968,20 @@ const server = http.createServer(async (req, res) => {
           });
           itemsCreados.push(item);
         } catch (encErr) {
-          log(`Aviso al encolar en ${grupoUrl}: ${encErr.message}`);
+          logger(`Aviso al encolar destino legacy: ${encErr.message}`);
         }
       }
 
-      log(`Sondeo para Lead #${lead_id} (${machine} en ${region}) encolado en ${itemsCreados.length} grupos`);
+      logger(`Sondeo legacy para Lead #${lead_id} encolado en ${itemsCreados.length} grupos`);
 
       // 4. Si auto_start está activo, ejecutar en background sin bloquear la respuesta
+      let workerIniciado = false;
       if (auto_start && !isWorkerBusy) {
+        workerIniciado = true;
         setImmediate(() => {
-          ejecutarColaWorker().catch((e) => log(`Error en background worker: ${e.message}`, 'ERROR'));
+          Promise.resolve()
+            .then(() => worker())
+            .catch((error) => logger(`Error en background worker: ${error.message}`, 'ERROR'));
         });
       }
 
@@ -454,7 +991,7 @@ const server = http.createServer(async (req, res) => {
         lead_id,
         grupos_encolados: itemsCreados.length,
         items: itemsCreados.map((i) => ({ id: i.id, grupo: i.grupo })),
-        worker_iniciado: auto_start && !isWorkerBusy,
+        worker_iniciado: workerIniciado,
       });
       return;
     }
@@ -462,18 +999,24 @@ const server = http.createServer(async (req, res) => {
     // POST /api/worker/run (Disparo manual)
     if (req.method === 'POST' && url.pathname === '/api/worker/run') {
       if (isWorkerBusy) {
-        enviarJSON(res, 409, { error: 'Worker ya se encuentra en ejecución' });
+        enviarError(res, 409, 'worker_busy');
         return;
       }
       setImmediate(() => {
-        ejecutarColaWorker().catch((e) => log(`Error en worker disparado manualmente: ${e.message}`, 'ERROR'));
+        Promise.resolve()
+          .then(() => worker())
+          .catch((error) => logger(`Error en worker disparado manualmente: ${error.message}`, 'ERROR'));
       });
       enviarJSON(res, 202, { ok: true, message: 'Worker iniciado en segundo plano' });
       return;
     }
 
-    // GET / (Servir Visor HTML)
+    // GET / (Servir Visor HTML solo en loopback)
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/visor')) {
+      if (!esDireccionLocal(req.socket.remoteAddress)) {
+        enviarError(res, 404, 'not_found');
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(`<!DOCTYPE html>
 <html lang="es">
@@ -562,15 +1105,102 @@ setInterval(cargar, 10000);
       return;
     }
 
-    enviarJSON(res, 404, { error: 'Ruta no encontrada' });
+    enviarError(res, 404, 'not_found');
   } catch (err) {
-    enviarJSON(res, 500, { error: err.message });
+    if (err.statusCode === 413) {
+      enviarError(res, 413, 'payload_too_large');
+      return;
+    }
+    enviarError(res, 500, 'internal_error');
   }
-});
+}
 
-server.listen(PORT, () => {
-  log(`🚀 Servidor de Captación y Sondeo activo en http://0.0.0.0:${PORT}`);
-  log(`Configuración: HEADLESS=${HEADLESS}, MODO_ASISTIDO=${MODO_ASISTIDO}, MOCK_WORKER=${MOCK_WORKER}`);
-});
+function crearServidor(dependencies = {}) {
+  const hmacSecret = dependencies.hmacSecret ?? process.env.ONRENTX_HMAC_SECRET;
+  if (!dependencies.verificador && (typeof hmacSecret !== 'string' || hmacSecret.trim().length === 0)) {
+    throw new Error('ONRENTX_HMAC_SECRET is required');
+  }
+  if (process.env.MAX_REQUEST_BODY_BYTES !== undefined) {
+    throw new Error('MAX_REQUEST_BODY_BYTES is obsolete; use REQUEST_BODY_LIMIT_BYTES');
+  }
 
-module.exports = { server, buscarGruposParaRegion, ejecutarColaWorker };
+  const now = dependencies.now || (() => Date.now());
+  const maxSkewSeconds = validarEnteroConfiguracion(
+    dependencies.maxSkewSeconds ?? process.env.HMAC_MAX_SKEW_SECONDS ?? 300,
+    'HMAC_MAX_SKEW_SECONDS',
+    0,
+  );
+  const maxBodyBytes = validarEnteroConfiguracion(
+    dependencies.maxBodyBytes ?? process.env.REQUEST_BODY_LIMIT_BYTES ?? 2097152,
+    'REQUEST_BODY_LIMIT_BYTES',
+    1,
+  );
+  const maxCopyCodePoints = validarEnteroConfiguracion(
+    dependencies.maxCopyCodePoints ?? process.env.MAX_COPY_CODE_POINTS ?? DEFAULT_MAX_COPY_CODE_POINTS,
+    'MAX_COPY_CODE_POINTS',
+    1,
+  );
+  const maxGroupsPerBatch = validarEnteroConfiguracion(
+    dependencies.maxGroupsPerBatch ?? process.env.MAX_GROUPS_PER_BATCH ?? DEFAULT_MAX_GROUPS_PER_BATCH,
+    'MAX_GROUPS_PER_BATCH',
+    1,
+  );
+
+  const deps = {
+    ...dependencies,
+    cola: dependencies.cola || cola,
+    catalogo: dependencies.catalogo || crearCatalogo({
+      path: dependencies.catalogPath
+        || process.env.CATALOGO_PATH
+        || path.join(__dirname, 'catalogo_grupos.json'),
+    }),
+    enableLegacyGroupSelection: dependencies.enableLegacyGroupSelection
+      ?? String(process.env.ENABLE_LEGACY_GROUP_SELECTION ?? 'false').toLowerCase() === 'true',
+    worker: dependencies.worker || ejecutarColaLegacy,
+    logger: dependencies.logger || log,
+    launchPersistentContext: dependencies.launchPersistentContext
+      || ((...args) => chromium.launchPersistentContext(...args)),
+    sessionPath: dependencies.sessionPath || SESSION_PATH,
+    validateGroup: dependencies.validateGroup
+      || dependencies.validarGrupoFacebook
+      || validarGrupoFacebook,
+    now,
+    maxBodyBytes,
+    maxCopyCodePoints,
+    maxGroupsPerBatch,
+    allowedOrigins: normalizarOrigenesPermitidos(
+      dependencies.allowedOrigins ?? process.env.CORS_ALLOWED_ORIGINS,
+    ),
+    verificador: dependencies.verificador || crearVerificador({
+      secret: hmacSecret,
+      maxSkewSeconds,
+      nowSeconds: () => Math.floor(now() / 1000),
+    }),
+  };
+
+  return http.createServer(async (req, res) => {
+    await manejarPeticion(req, res, deps);
+  });
+}
+
+function iniciarServidor({ port = PORT, host = '0.0.0.0', ...dependencies } = {}) {
+  const server = crearServidor(dependencies);
+  server.listen(port, host);
+  return server;
+}
+
+if (require.main === module) {
+  const server = iniciarServidor({ host: process.env.HOST });
+  server.on('listening', () => {
+    const address = server.address();
+    log(`Servidor de captación escuchando en http://${address.address}:${address.port}`);
+  });
+}
+
+module.exports = {
+  crearServidor,
+  iniciarServidor,
+  ejecutarColaWorker,
+  normalizarErrorFacebook,
+  buscarGruposParaRegion,
+};

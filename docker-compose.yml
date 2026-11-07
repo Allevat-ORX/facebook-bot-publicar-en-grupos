@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   onrentx-captacion-worker:
     build: .
@@ -8,14 +6,22 @@ services:
     ports:
       - "4599:4599"
     environment:
-      - PORT=4599
-      - HEADLESS=true
-      - MODO_ASISTIDO=false
-      - LIMITE_TANDA=5
-      - FB_SESSION_DIR=/app/facebook-session
+      PORT: 4599
+      HEADLESS: "true"
+      MODO_ASISTIDO: "false"
+      LIMITE_TANDA: 5
+      FB_SESSION_DIR: /app/facebook-session
+      COLA_PATH: /app/data/cola.json
+      CATALOGO_PATH: /app/data/catalogo_grupos.json
+      ONRENTX_HMAC_SECRET: ${ONRENTX_HMAC_SECRET:?required}
+      HMAC_MAX_SKEW_SECONDS: 300
+      MAX_GROUPS_PER_BATCH: 30
+      REQUEST_BODY_LIMIT_BYTES: 2097152
+      ENABLE_LEGACY_GROUP_SELECTION: "true"
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
     volumes:
       - ./facebook-session:/app/facebook-session
-      - ./cola.json:/app/cola.json
+      - ./data:/app/data
       - ./log.txt:/app/log.txt
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4599/health"]

@@ -1,0 +1,33 @@
+# Datos operativos y colas
+data/
+cola.json
+catalogo_grupos.json
+cola_trama_materiales.json
+
+# Logs, capturas y evidencias
+*.log
+log.txt
+*.png
+error-*.png
+screenshots/
+
+# Sesiones y perfiles de Facebook
+facebook-session/
+sessions/
+session-profile2/
+
+# Artefactos de agentes y control de versiones
+.superpowers/
+.git/
+
+# Entornos, secretos y credenciales
+.env*
+secretos.txt
+*credentials*
+*credential*
+*secret*
+*.key
+*.pem
+*.p8
+credentials/
+keys/

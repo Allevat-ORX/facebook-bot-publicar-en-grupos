@@ -5,16 +5,23 @@ After=network.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/opt/onrentx/facebook-bot-publicar-en-grupos
+WorkingDirectory=/opt/onrentx-captacion-facebook
 ExecStart=/usr/bin/node servidor_captacion.js
 Restart=always
 RestartSec=10
+EnvironmentFile=/etc/onrentx/captacion.env
 Environment=NODE_ENV=production
 Environment=PORT=4599
 Environment=HEADLESS=true
 Environment=MODO_ASISTIDO=false
 Environment=LIMITE_TANDA=5
-Environment=FB_SESSION_DIR=/opt/onrentx/facebook-bot-publicar-en-grupos/facebook-session
+Environment=FB_SESSION_DIR=/opt/onrentx-captacion-facebook/facebook-session
+Environment=COLA_PATH=/opt/onrentx-captacion-facebook/data/cola.json
+Environment=CATALOGO_PATH=/opt/onrentx-captacion-facebook/data/catalogo_grupos.json
+Environment=MAX_GROUPS_PER_BATCH=30
+Environment=HMAC_MAX_SKEW_SECONDS=300
+Environment=REQUEST_BODY_LIMIT_BYTES=2097152
+Environment=ENABLE_LEGACY_GROUP_SELECTION=true
 
 # Resource Limits
 LimitNOFILE=65535
