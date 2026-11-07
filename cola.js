@@ -9,6 +9,7 @@
 // Queue v2 añade lotes idempotentes sin reescribir los items históricos v1.
 // ============================================================
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -30,6 +31,7 @@ const ESTADOS_RESUMEN = ['queued', 'publishing', 'published', 'error', 'cancelle
 const ESTADOS_TERMINALES = ['published', 'error', 'cancelled'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY_PATTERN = /^sha256:[0-9a-f]{64}$/i;
+const FACEBOOK_GROUP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 // ¿Existe un archivo de cola? (define si el bot corre en "modo cola" o "modo lista").
 function existeCola() {
@@ -232,6 +234,12 @@ function crearErrorConflicto(code, message) {
   return error;
 }
 
+function crearIdempotencyKey(leadId, facebookGroupId, campaignRevision) {
+  return `sha256:${crypto.createHash('sha256')
+    .update(`${leadId}|${facebookGroupId}|${campaignRevision}`, 'utf8')
+    .digest('hex')}`;
+}
+
 function validarEntradaLote({ batch, items } = {}) {
   const errores = [];
   if (!batch || typeof batch !== 'object' || Array.isArray(batch)) {
@@ -255,8 +263,8 @@ function validarEntradaLote({ batch, items } = {}) {
         errores.push(`${prefix} debe ser un objeto`);
         return;
       }
-      if (typeof item.facebook_group_id !== 'string' || !/^\d+$/.test(item.facebook_group_id)) {
-        errores.push(`${prefix}.facebook_group_id debe contener solo dígitos`);
+      if (typeof item.facebook_group_id !== 'string' || !FACEBOOK_GROUP_ID_PATTERN.test(item.facebook_group_id)) {
+        errores.push(`${prefix}.facebook_group_id debe contener solo caracteres seguros`);
       }
       if (typeof item.grupo !== 'string' || item.grupo.trim().length === 0) {
         errores.push(`${prefix}.grupo debe ser una URL no vacía`);
@@ -270,6 +278,17 @@ function validarEntradaLote({ batch, items } = {}) {
       }
       if (!Number.isSafeInteger(item.campaign_revision) || item.campaign_revision <= 0) {
         errores.push(`${prefix}.campaign_revision debe ser un entero positivo`);
+      }
+      if (
+        typeof item.facebook_group_id === 'string'
+        && FACEBOOK_GROUP_ID_PATTERN.test(item.facebook_group_id)
+        && Number.isSafeInteger(item.campaign_revision)
+        && item.campaign_revision > 0
+        && typeof item.idempotency_key === 'string'
+        && IDEMPOTENCY_KEY_PATTERN.test(item.idempotency_key)
+        && item.idempotency_key !== crearIdempotencyKey(batch?.lead_id, item.facebook_group_id, item.campaign_revision)
+      ) {
+        errores.push(`${prefix}.idempotency_key no coincide con lead_id|facebook_group_id|campaign_revision`);
       }
       if (typeof item.copy !== 'string' || item.copy.trim().length === 0) {
         errores.push(`${prefix}.copy debe ser un string no vacío`);
@@ -332,11 +351,13 @@ function resumirBatch(data, batchUuid) {
     lead_id: items[0] ? items[0].lead_id : null,
     state: terminal && counts.error > 0
       ? 'error'
-      : terminal
-        ? 'published'
-        : counts.publishing > 0
-          ? 'publishing'
-          : 'queued',
+      : terminal && counts.cancelled === items.length
+        ? 'cancelled'
+        : terminal
+          ? 'published'
+          : counts.publishing > 0
+            ? 'publishing'
+            : 'queued',
     terminal,
     counts: { total: items.length, ...counts },
     items,
@@ -375,6 +396,17 @@ function encolarLote(solicitud = {}) {
   const pending = [];
   for (const entrada of items) {
     const previous = existingByKey.get(entrada.idempotency_key);
+    const sameScope = data.items.find((candidate) => (
+      candidate.lead_id === batch.lead_id
+      && candidate.facebook_group_id === entrada.facebook_group_id
+      && candidate.campaign_revision === entrada.campaign_revision
+    ));
+    if (sameScope && !previous) {
+      throw crearErrorConflicto(
+        'IDEMPOTENCY_KEY_CONFLICT',
+        `encolarLote: lead_id "${batch.lead_id}" y grupo "${entrada.facebook_group_id}" ya tienen una publicación para la revisión ${entrada.campaign_revision}`,
+      );
+    }
     if (!previous) {
       pending.push(entrada);
       continue;
@@ -443,6 +475,7 @@ module.exports = {
   generarId,
   encolarItem,
   encolarLote,
+  crearIdempotencyKey,
   buscarBatch,
   estadoActual,
   resumirBatch,

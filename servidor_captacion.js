@@ -36,6 +36,7 @@ const DEFAULT_MAX_COPY_CODE_POINTS = 63206;
 const DEFAULT_MAX_GROUPS_PER_BATCH = 30;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const FACEBOOK_GROUP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 const SESSION_PATH = process.env.FB_SESSION_DIR || path.join(__dirname, 'facebook-session');
 
 let isWorkerBusy = false;
@@ -62,6 +63,10 @@ function enviarJSON(res, code, obj) {
   const body = JSON.stringify(obj, null, 2);
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(body);
+}
+
+function enviarError(res, status, errorCode, extra = {}) {
+  enviarJSON(res, status, { error_code: errorCode, error: errorCode, ...extra });
 }
 
 function crearErrorPayloadDemasiadoGrande() {
@@ -192,8 +197,8 @@ function validarPayloadV2(payload, catalogo, maxCopyCodePoints, maxGroupsPerBatc
       return;
     }
 
-    if (typeof group.facebook_group_id !== 'string' || !/^\d+$/.test(group.facebook_group_id)) {
-      errores.push(`${prefix}.facebook_group_id debe contener solo dígitos`);
+    if (typeof group.facebook_group_id !== 'string' || !FACEBOOK_GROUP_ID_PATTERN.test(group.facebook_group_id)) {
+      errores.push(`${prefix}.facebook_group_id debe contener solo caracteres seguros`);
     } else if (ids.has(group.facebook_group_id)) {
       errores.push(`${prefix}.facebook_group_id está duplicado`);
     } else {
@@ -206,6 +211,17 @@ function validarPayloadV2(payload, catalogo, maxCopyCodePoints, maxGroupsPerBatc
       errores.push(`${prefix}.idempotency_key está duplicada`);
     } else {
       keys.add(group.idempotency_key);
+    }
+
+    const campaignRevision = group.campaign_revision === undefined ? 1 : group.campaign_revision;
+    if (!Number.isSafeInteger(campaignRevision) || campaignRevision <= 0) {
+      errores.push(`${prefix}.campaign_revision debe ser un entero positivo`);
+    } else if (
+      typeof group.idempotency_key === 'string'
+      && IDEMPOTENCY_KEY_PATTERN.test(group.idempotency_key)
+      && group.idempotency_key !== cola.crearIdempotencyKey(payload.lead_id, group.facebook_group_id, campaignRevision)
+    ) {
+      errores.push(`${prefix}.idempotency_key no coincide con lead_id|facebook_group_id|campaign_revision`);
     }
 
     let normalizado;
@@ -243,7 +259,7 @@ function respuestaDispatchV2(payload, result, colaActual) {
     ok: true,
     batch_uuid: payload.batch_uuid,
     lead_id: payload.lead_id,
-    state: 'queued',
+    state: colaActual.resumirBatch(colaActual.leerCola(), payload.batch_uuid).state,
     items: result.created.concat(result.existing).map((item) => ({
       remote_item_id: item.id,
       facebook_group_id: item.facebook_group_id,
@@ -660,7 +676,7 @@ async function manejarPeticion(req, res, deps) {
   const corsPermitido = aplicarCors(req, res, allowedOrigins);
   if (req.method === 'OPTIONS') {
     if (!corsPermitido) {
-      enviarJSON(res, 403, { error: 'origin_not_allowed' });
+      enviarError(res, 403, 'origin_not_allowed');
       return;
     }
     res.writeHead(204);
@@ -676,7 +692,7 @@ async function manejarPeticion(req, res, deps) {
       rawBody = await leerBody(req, maxBodyBytes);
       const resultadoFirma = verificarFirma(req, url.pathname, rawBody, verificador);
       if (!resultadoFirma.ok) {
-        enviarJSON(res, resultadoFirma.status, { error: resultadoFirma.errorCode });
+        enviarError(res, resultadoFirma.status, resultadoFirma.errorCode);
         return;
       }
     }
@@ -701,7 +717,7 @@ async function manejarPeticion(req, res, deps) {
       try {
         payload = JSON.parse(rawBody);
       } catch (_) {
-        enviarJSON(res, 400, { error: 'invalid_json' });
+        enviarError(res, 400, 'invalid_json');
         return;
       }
 
@@ -712,7 +728,7 @@ async function manejarPeticion(req, res, deps) {
         || typeof payload.facebook_group_id !== 'string'
         || typeof payload.url !== 'string'
       ) {
-        enviarJSON(res, 400, { error: 'invalid_group' });
+        enviarError(res, 400, 'invalid_group');
         return;
       }
 
@@ -720,20 +736,31 @@ async function manejarPeticion(req, res, deps) {
       try {
         normalized = normalizarGrupoFacebook(payload.url);
       } catch (_) {
-        enviarJSON(res, 400, { error: 'invalid_facebook_group_url' });
+        enviarError(res, 400, 'invalid_facebook_group_url');
         return;
       }
       if (normalized.facebook_group_id !== payload.facebook_group_id) {
-        enviarJSON(res, 400, { error: 'facebook_group_mismatch' });
+        enviarError(res, 400, 'facebook_group_mismatch');
         return;
       }
 
       if (!catalogo.buscar(normalized.facebook_group_id)) {
-        enviarJSON(res, 404, { error: 'facebook_group_not_found' });
-        return;
+        if (typeof catalogo.crearGrupoProvisional !== 'function') {
+          enviarError(res, 404, 'facebook_group_not_found');
+          return;
+        }
+        try {
+          catalogo.crearGrupoProvisional({
+            facebook_group_id: normalized.facebook_group_id,
+            url: normalized.url,
+          });
+        } catch (_) {
+          enviarError(res, 400, 'invalid_group');
+          return;
+        }
       }
       if (isWorkerBusy) {
-        enviarJSON(res, 409, { error: 'profile_busy' });
+        enviarError(res, 409, 'profile_busy');
         return;
       }
 
@@ -751,11 +778,28 @@ async function manejarPeticion(req, res, deps) {
           viewport: { width: 1280, height: 800 },
         });
         const page = await context.newPage();
-        const result = await validateGroup(page, {
-          facebook_group_id: normalized.facebook_group_id,
-          url: normalized.url,
-        });
+        let result;
+        try {
+          result = await validateGroup(page, {
+            facebook_group_id: normalized.facebook_group_id,
+            url: normalized.url,
+          });
+        } catch (_) {
+          result = {
+            facebook_group_id: normalized.facebook_group_id,
+            url: normalized.url,
+            membership_state: 'unknown',
+            group_type: 'unknown',
+            validation_state: 'invalid',
+            validated_at: new Date().toISOString(),
+            warning: 'navigation_error',
+          };
+        }
         catalogo.guardarValidacion(result);
+        if (result.validation_state === 'invalid' && result.warning === 'navigation_error') {
+          enviarError(res, 502, 'validation_navigation_error');
+          return;
+        }
         enviarJSON(res, 200, { ok: true, ...result });
       } finally {
         if (context) {
@@ -773,17 +817,17 @@ async function manejarPeticion(req, res, deps) {
     if (req.method === 'GET' && batchMatch) {
       const batchUuid = batchMatch[1];
       if (!UUID_PATTERN.test(batchUuid)) {
-        enviarJSON(res, 400, { error: 'invalid_batch_uuid' });
+        enviarError(res, 400, 'invalid_batch_uuid');
         return;
       }
       if (!cola.existeCola()) {
-        enviarJSON(res, 404, { error: 'batch_not_found' });
+        enviarError(res, 404, 'batch_not_found');
         return;
       }
 
       const summary = cola.resumirBatch(cola.leerCola(), batchUuid);
       if (summary.counts.total === 0) {
-        enviarJSON(res, 404, { error: 'batch_not_found' });
+        enviarError(res, 404, 'batch_not_found');
         return;
       }
       enviarJSON(res, 200, summary);
@@ -814,14 +858,14 @@ async function manejarPeticion(req, res, deps) {
       try {
         payload = JSON.parse(rawBody);
       } catch (_) {
-        enviarJSON(res, 400, { error: 'Payload JSON inválido' });
+        enviarError(res, 400, 'invalid_json');
         return;
       }
 
       if (!esContratoLegacy(payload)) {
         const errores = validarPayloadV2(payload, catalogo, maxCopyCodePoints, maxGroupsPerBatch);
         if (errores.length > 0) {
-          enviarJSON(res, 400, { error: 'invalid_payload', details: errores });
+          enviarError(res, 400, 'invalid_payload', { details: errores });
           return;
         }
 
@@ -836,17 +880,17 @@ async function manejarPeticion(req, res, deps) {
               facebook_group_id: group.facebook_group_id,
               grupo: group.url,
               idempotency_key: group.idempotency_key,
-              campaign_revision: 1,
+              campaign_revision: group.campaign_revision === undefined ? 1 : group.campaign_revision,
               copy: payload.copy,
             })),
           });
         } catch (error) {
           if (['BATCH_UUID_CONFLICT', 'IDEMPOTENCY_KEY_CONFLICT'].includes(error.code)) {
-            enviarJSON(res, 409, { error: error.code.toLowerCase() });
+            enviarError(res, 409, error.code.toLowerCase());
             return;
           }
           if (error.code === 'INVALID_BATCH') {
-            enviarJSON(res, 400, { error: 'invalid_payload' });
+            enviarError(res, 400, 'invalid_payload');
             return;
           }
           throw error;
@@ -858,7 +902,7 @@ async function manejarPeticion(req, res, deps) {
       }
 
       if (!enableLegacyGroupSelection) {
-        enviarJSON(res, 400, { error: 'legacy_contract_disabled' });
+        enviarError(res, 400, 'legacy_contract_disabled');
         return;
       }
       logger('contract=legacy');
@@ -876,15 +920,14 @@ async function manejarPeticion(req, res, deps) {
       } = payload;
 
       if (Array.isArray(groups) && groups.length > maxGroupsPerBatch) {
-        enviarJSON(res, 400, {
-          error: 'invalid_payload',
+        enviarError(res, 400, 'invalid_payload', {
           details: [`groups debe contener entre 1 y ${maxGroupsPerBatch} grupos`],
         });
         return;
       }
 
       if (!lead_id) {
-        enviarJSON(res, 400, { error: 'El campo "lead_id" es obligatorio' });
+        enviarError(res, 400, 'lead_id_required');
         return;
       }
 
@@ -956,7 +999,7 @@ async function manejarPeticion(req, res, deps) {
     // POST /api/worker/run (Disparo manual)
     if (req.method === 'POST' && url.pathname === '/api/worker/run') {
       if (isWorkerBusy) {
-        enviarJSON(res, 409, { error: 'Worker ya se encuentra en ejecución' });
+        enviarError(res, 409, 'worker_busy');
         return;
       }
       setImmediate(() => {
@@ -971,7 +1014,7 @@ async function manejarPeticion(req, res, deps) {
     // GET / (Servir Visor HTML solo en loopback)
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/visor')) {
       if (!esDireccionLocal(req.socket.remoteAddress)) {
-        enviarJSON(res, 404, { error: 'Ruta no encontrada' });
+        enviarError(res, 404, 'not_found');
         return;
       }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -1062,13 +1105,13 @@ setInterval(cargar, 10000);
       return;
     }
 
-    enviarJSON(res, 404, { error: 'Ruta no encontrada' });
+    enviarError(res, 404, 'not_found');
   } catch (err) {
     if (err.statusCode === 413) {
-      enviarJSON(res, 413, { error: 'payload_too_large' });
+      enviarError(res, 413, 'payload_too_large');
       return;
     }
-    enviarJSON(res, 500, { error: err.message });
+    enviarError(res, 500, 'internal_error');
   }
 }
 

@@ -306,3 +306,60 @@ test('ships only an empty example and ignores the operational catalog', () => {
   assert.deepEqual(example, { version: 1, groups: [] });
   assert.ok(gitignore.includes('catalogo_grupos.json'));
 });
+
+
+test('creates a provisional runtime group without commercial fields', () => {
+  const { catalogPath, catalogo } = crearCatalogoTemporal();
+  const provisional = catalogo.crearGrupoProvisional({
+    facebook_group_id: 'new-vanity-group',
+    url: 'https://www.facebook.com/groups/new-vanity-group/',
+  });
+
+  assert.deepEqual(provisional, {
+    facebook_group_id: 'new-vanity-group',
+    url: 'https://www.facebook.com/groups/new-vanity-group/',
+    membership_state: 'unknown',
+    group_type: 'unknown',
+    validation_state: 'pending',
+    validated_at: null,
+    warning: null,
+  });
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(catalogPath, 'utf8')).groups[0]), [
+    'facebook_group_id',
+    'url',
+    'membership_state',
+    'group_type',
+    'validation_state',
+    'validated_at',
+    'warning',
+  ]);
+});
+
+test('infers non-QRO and non-SLP historical regions and recomputes scope', () => {
+  const sourceRoot = crearRaizMigracion();
+  const output = path.join(sourceRoot, 'operational.json');
+  const odooOutput = path.join(sourceRoot, 'odoo.json');
+  escribirJson(sourceRoot, '_grupos-clasificados.json', [
+    { url: 'https://facebook.com/groups/guanajuato-leon/', nombre: 'Maquinaria Guanajuato León', ciudad: 'León' },
+    { url: 'https://facebook.com/groups/hidalgo-pachuca/', nombre: 'Constructores Pachuca Hidalgo', ciudad: 'Pachuca' },
+    { url: 'https://facebook.com/groups/jalisco-guadalajara/', nombre: 'Maquinaria Guadalajara Jalisco', ciudad: 'Guadalajara' },
+    { url: 'https://facebook.com/groups/nuevo-leon-monterrey/', nombre: 'Renta Monterrey Nuevo León', ciudad: 'Monterrey' },
+    { url: 'https://facebook.com/groups/quintana-cancun-tulum/', nombre: 'Maquinaria Cancún Tulum Quintana Roo', ciudad: 'Cancún' },
+    { url: 'https://facebook.com/groups/oaxaca/', nombre: 'Construcción Oaxaca' },
+    { url: 'https://facebook.com/groups/tabasco/', nombre: 'Maquinaria Tabasco' },
+    { url: 'https://facebook.com/groups/yucatan/', nombre: 'Equipos Yucatán' },
+  ]);
+
+  ejecutarMigracion({ sourceRoot, output, odooOutput, logger: () => {} });
+  const groups = JSON.parse(fs.readFileSync(odooOutput, 'utf8')).groups;
+
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'guanajuato-leon').regions, ['GTO']);
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'hidalgo-pachuca').regions, ['HGO']);
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'jalisco-guadalajara').regions, ['JAL']);
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'nuevo-leon-monterrey').regions, ['NL']);
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'quintana-cancun-tulum').regions, ['QROO']);
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'oaxaca').regions, ['OAX']);
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'tabasco').regions, ['TAB']);
+  assert.deepEqual(groups.find((group) => group.facebook_group_id === 'yucatan').regions, ['YUC']);
+  assert.equal(groups.find((group) => group.facebook_group_id === 'guanajuato-leon').scope, 'local');
+});

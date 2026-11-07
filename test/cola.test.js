@@ -3,11 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { crearIdempotencyKey } = require('../cola');
 
 const BATCH_UUID = '123e4567-e89b-42d3-a456-426614174000';
 const OTHER_BATCH_UUID = '223e4567-e89b-42d3-a456-426614174001';
-const FIRST_KEY = `sha256:${'0'.repeat(64)}`;
-const SECOND_KEY = `sha256:${'1'.repeat(64)}`;
+const FIRST_KEY = crearIdempotencyKey(2212, '912187995658737', 1);
+const SECOND_KEY = crearIdempotencyKey(2212, '123456789', 1);
 
 function freshQueue(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'orx-cola-'));
@@ -412,4 +413,50 @@ test('does not select queued items globally when a batch is not provided', (t) =
   };
 
   assert.deepEqual(queue.itemsProcesables(data), []);
+});
+
+
+test('derives canonical idempotency keys and rejects a different key for the same lead group revision', (t) => {
+  const { queue } = freshQueue(t);
+  const canonicalKey = queue.crearIdempotencyKey(2212, 'vanity-group', 1);
+  const requestWithCanonicalKey = request({
+    items: [{
+      facebook_group_id: 'vanity-group',
+      grupo: 'https://www.facebook.com/groups/vanity-group/',
+      idempotency_key: canonicalKey,
+      campaign_revision: 1,
+      copy: 'Texto canónico',
+    }],
+  });
+
+  queue.encolarLote(requestWithCanonicalKey);
+
+  assert.throws(
+    () => queue.encolarLote({
+      batch: { batch_uuid: OTHER_BATCH_UUID, lead_id: 2212 },
+      items: [{
+        ...requestWithCanonicalKey.items[0],
+        idempotency_key: `sha256:${'f'.repeat(64)}`,
+      }],
+    }),
+    (error) => {
+      assert.equal(error.code, 'INVALID_BATCH');
+      return true;
+    },
+  );
+  assert.equal(queue.leerCola().items.length, 1);
+});
+
+test('reports cancelled when every item in a batch is cancelled', (t) => {
+  const { queue } = freshQueue(t);
+  const data = {
+    version: 2,
+    items: [{ batch_uuid: BATCH_UUID, lead_id: 2212, estado: 'cancelled' }],
+  };
+
+  const summary = queue.resumirBatch(data, BATCH_UUID);
+
+  assert.equal(summary.state, 'cancelled');
+  assert.equal(summary.terminal, true);
+  assert.equal(summary.counts.cancelled, 1);
 });

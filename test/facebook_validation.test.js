@@ -16,10 +16,20 @@ function pageWithTexts(texts) {
             isVisible: async () => texts.some((value) => (
               options.exact ? value === text : value.includes(text)
             )),
+            click: async () => {},
           };
         },
       };
     },
+    locator: () => ({
+      first: () => ({
+        isVisible: async () => texts.some((value) => (
+          ['Escribe algo', 'Escriu alguna cosa', 'Write something', 'Crea una publicación']
+            .some((trigger) => value.includes(trigger))
+        )),
+      }),
+    }),
+    keyboard: { press: async () => {} },
     goto: async () => {},
   };
 }
@@ -83,4 +93,41 @@ test('validates a standard member group without inserting text or publishing', a
   assert.equal(result.warning, null);
   assert.equal(actions.some(([name]) => name === 'insertText'), false);
   assert.equal(actions.some(([name]) => name === 'clickPublish'), false);
+});
+
+
+test('requires a visible contenteditable editor for a standard composer and closes it with Escape', async () => {
+  const actions = [];
+  const page = {
+    getByText: (text) => ({
+      first: () => ({
+        isVisible: async () => text === 'Write something',
+        click: async () => actions.push('open'),
+      }),
+    }),
+    locator: () => ({
+      first: () => ({ isVisible: async () => true }),
+    }),
+    keyboard: { press: async (key) => actions.push(key) },
+  };
+
+  assert.equal(await detectarTipoCompositor(page), 'standard');
+  assert.deepEqual(actions, ['open', 'Escape']);
+});
+
+test('returns unknown when the standard composer has no visible editor', async () => {
+  const page = {
+    getByText: (text) => ({
+      first: () => ({
+        isVisible: async () => text === 'Write something',
+        click: async () => {},
+      }),
+    }),
+    locator: () => ({
+      first: () => ({ isVisible: async () => false }),
+    }),
+    keyboard: { press: async () => { throw new Error('must not close absent editor'); } },
+  };
+
+  assert.equal(await detectarTipoCompositor(page), 'unknown');
 });

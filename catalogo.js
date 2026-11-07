@@ -53,6 +53,35 @@ function crearCatalogo({ path }) {
     return leer().groups.find((group) => group.facebook_group_id === facebookGroupId) || null;
   }
 
+  function guardarDatos(data) {
+    fs.mkdirSync(require('node:path').dirname(path), { recursive: true });
+    const temporaryPath = `${path}.${process.pid}.tmp`;
+    fs.writeFileSync(temporaryPath, `${JSON.stringify(data, null, 2)}\n`);
+    fs.renameSync(temporaryPath, path);
+  }
+
+  function crearGrupoProvisional({ facebook_group_id: facebookGroupId, url } = {}) {
+    const normalized = normalizarGrupoFacebook(url);
+    if (normalized.facebook_group_id !== facebookGroupId) throw new Error('facebook_group_mismatch');
+
+    const data = leer();
+    const existing = data.groups.find((group) => group.facebook_group_id === facebookGroupId);
+    if (existing) return existing;
+
+    const provisional = {
+      facebook_group_id: normalized.facebook_group_id,
+      url: normalized.url,
+      membership_state: 'unknown',
+      group_type: 'unknown',
+      validation_state: 'pending',
+      validated_at: null,
+      warning: null,
+    };
+    data.groups.push(provisional);
+    guardarDatos(data);
+    return provisional;
+  }
+
   function guardarValidacion(resultado) {
     const data = leer();
     const group = data.groups.find(
@@ -64,9 +93,7 @@ function crearCatalogo({ path }) {
       if (Object.prototype.hasOwnProperty.call(resultado, field)) group[field] = resultado[field];
     }
 
-    const temporaryPath = `${path}.${process.pid}.tmp`;
-    fs.writeFileSync(temporaryPath, `${JSON.stringify(data, null, 2)}\n`);
-    fs.renameSync(temporaryPath, path);
+    guardarDatos(data);
     return group;
   }
 
@@ -79,7 +106,7 @@ function crearCatalogo({ path }) {
     );
   }
 
-  return { leer, buscar, guardarValidacion, esDestinoOperativo };
+  return { leer, buscar, crearGrupoProvisional, guardarValidacion, esDestinoOperativo };
 }
 
 module.exports = { normalizarGrupoFacebook, crearCatalogo };

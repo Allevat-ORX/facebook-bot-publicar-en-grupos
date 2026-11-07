@@ -22,10 +22,21 @@ function valoresUnicos(values) {
 }
 
 function regionesDesdeTexto(value) {
-  const text = String(value || '').toLowerCase();
+  const text = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
   const regions = [];
   if (/san luis|\bslp\b|potos|soledad/.test(text)) regions.push('SLP');
-  if (/quer[eé]taro|\bqro\b/.test(text)) regions.push('QRO');
+  if (/queretaro|\bqro\b/.test(text)) regions.push('QRO');
+  if (/guanajuato|silao|irapuato|celaya/.test(text) || (/(^|[\s,])leon($|[\s,])/.test(text) && !/nuevo leon/.test(text))) regions.push('GTO');
+  if (/hidalgo|pachuca/.test(text)) regions.push('HGO');
+  if (/jalisco|guadalajara/.test(text)) regions.push('JAL');
+  if (/nuevo leon|monterrey/.test(text)) regions.push('NL');
+  if (/quintana roo|cancun|tulum/.test(text)) regions.push('QROO');
+  if (/oaxaca/.test(text)) regions.push('OAX');
+  if (/tabasco/.test(text)) regions.push('TAB');
+  if (/yucatan/.test(text)) regions.push('YUC');
   return valoresUnicos(regions);
 }
 
@@ -41,6 +52,8 @@ function convertirRegistro(entry, context = {}) {
 
   const regions = valoresUnicos([
     ...regionesDesdeTexto(raw.ciudad),
+    ...regionesDesdeTexto(raw.region),
+    ...regionesDesdeTexto(raw.estado),
     ...regionesDesdeTexto(raw.nombre),
     ...(context.regions || []),
   ]);

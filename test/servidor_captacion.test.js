@@ -7,14 +7,15 @@ const path = require('node:path');
 const { listen } = require('./helpers');
 const { crearCadenaCanonica, calcularFirma } = require('../auth');
 const { crearCatalogo } = require('../catalogo');
+const { crearIdempotencyKey } = require('../cola');
 
 const HMAC_SECRET = 'test-only-secret';
 const NOW_SECONDS = 1793990000;
 const BATCH_UUID = '123e4567-e89b-42d3-a456-426614174000';
 const FIRST_GROUP_ID = '912187995658737';
 const SECOND_GROUP_ID = '123456789';
-const FIRST_KEY = `sha256:${'0'.repeat(64)}`;
-const SECOND_KEY = `sha256:${'1'.repeat(64)}`;
+const FIRST_KEY = crearIdempotencyKey(2212, FIRST_GROUP_ID, 1);
+const SECOND_KEY = crearIdempotencyKey(2212, SECOND_GROUP_ID, 1);
 
 process.env.ONRENTX_HMAC_SECRET = HMAC_SECRET;
 process.env.MOCK_WORKER = 'true';
@@ -218,7 +219,7 @@ test('keeps health public while queue and future operational GET routes require 
 
   assert.equal(health.status, 200);
   assert.equal(health.body.status, 'ok');
-  assert.deepEqual(queue.body, { error: 'missing_signature' });
+  assert.deepEqual(queue.body, { error_code: 'missing_signature', error: 'missing_signature' });
   assert.equal(queue.status, 401);
   assert.equal(futureRoute.status, 401);
 });
@@ -248,7 +249,7 @@ test('accepts a signed write once and rejects the repeated nonce before another 
   assert.equal(first.status, 202);
   assert.equal(first.body.ok, true);
   assert.equal(replay.status, 409);
-  assert.deepEqual(replay.body, { error: 'replay_detected' });
+  assert.deepEqual(replay.body, { error_code: 'replay_detected', error: 'replay_detected' });
   assert.equal(colaFake.enqueueCalls, 1);
 });
 
@@ -268,7 +269,7 @@ test('rejects an unsigned write without mutating the queue', async (t) => {
   });
 
   assert.equal(response.status, 401);
-  assert.deepEqual(response.body, { error: 'missing_signature' });
+  assert.deepEqual(response.body, { error_code: 'missing_signature', error: 'missing_signature' });
   assert.equal(colaFake.enqueueCalls, 0);
 });
 
@@ -283,7 +284,7 @@ test('returns a controlled 413 and never parses or mutates an oversized body', a
   });
 
   assert.equal(response.status, 413);
-  assert.deepEqual(response.body, { error: 'payload_too_large' });
+  assert.deepEqual(response.body, { error_code: 'payload_too_large', error: 'payload_too_large' });
   assert.equal(colaFake.enqueueCalls, 0);
 });
 
@@ -322,7 +323,7 @@ test('uses exactly 2097152 bytes as the default request body limit', async (t) =
 
     assert.equal(accepted.status, 202);
     assert.equal(rejected.status, 413);
-    assert.deepEqual(rejected.body, { error: 'payload_too_large' });
+    assert.deepEqual(rejected.body, { error_code: 'payload_too_large', error: 'payload_too_large' });
   } finally {
     restaurarVariableEntorno('REQUEST_BODY_LIMIT_BYTES', previousApprovedLimit);
     restaurarVariableEntorno('MAX_REQUEST_BODY_BYTES', previousObsoleteLimit);
@@ -344,7 +345,7 @@ test('uses REQUEST_BODY_LIMIT_BYTES from the environment', async (t) => {
     });
 
     assert.equal(response.status, 413);
-    assert.deepEqual(response.body, { error: 'payload_too_large' });
+    assert.deepEqual(response.body, { error_code: 'payload_too_large', error: 'payload_too_large' });
   } finally {
     restaurarVariableEntorno('REQUEST_BODY_LIMIT_BYTES', previousApprovedLimit);
     restaurarVariableEntorno('MAX_REQUEST_BODY_BYTES', previousObsoleteLimit);
@@ -396,7 +397,7 @@ test('serves the legacy visor only on loopback without exposing unsigned queue d
   assert.equal(visor.status, 200);
   assert.match(visor.body, /OnRentX Captación Server/);
   assert.equal(queue.status, 401);
-  assert.deepEqual(queue.body, { error: 'missing_signature' });
+  assert.deepEqual(queue.body, { error_code: 'missing_signature', error: 'missing_signature' });
 });
 
 test('direct startup fails before listening when the HMAC secret is missing', async () => {
@@ -484,7 +485,7 @@ test('keeps the legacy string-array contract disabled unless explicitly enabled'
   const rejected = await solicitarJsonFirmado(disabled.baseUrl, pathname, payload);
 
   assert.equal(rejected.status, 400);
-  assert.deepEqual(rejected.body, { error: 'legacy_contract_disabled' });
+  assert.deepEqual(rejected.body, { error_code: 'legacy_contract_disabled', error: 'legacy_contract_disabled' });
   assert.equal(disabledQueue.enqueueCalls, 0);
 
   const messages = [];
@@ -516,7 +517,7 @@ test('rejects every invalid strict-v2 boundary before mutating the queue', async
     ['more than 30 groups', {
       groups: Array.from({ length: 31 }, (_, index) => crearGrupoV2(
         String(800000000000000 + index),
-        `sha256:${index.toString(16).padStart(64, '0')}`,
+        crearIdempotencyKey(2212, String(800000000000000 + index), 1),
       )),
     }],
     ['duplicate group IDs', {
@@ -622,11 +623,11 @@ test('dispatches a two-group v2 batch idempotently and reports its signed status
   const missingUuid = '223e4567-e89b-42d3-a456-426614174001';
   const missing = await solicitarGetFirmado(listener.baseUrl, `/api/batches/${missingUuid}`);
   assert.equal(missing.status, 404);
-  assert.deepEqual(missing.body, { error: 'batch_not_found' });
+  assert.deepEqual(missing.body, { error_code: 'batch_not_found', error: 'batch_not_found' });
 
   const invalid = await solicitarGetFirmado(listener.baseUrl, '/api/batches/not-a-uuid');
   assert.equal(invalid.status, 400);
-  assert.deepEqual(invalid.body, { error: 'invalid_batch_uuid' });
+  assert.deepEqual(invalid.body, { error_code: 'invalid_batch_uuid', error: 'invalid_batch_uuid' });
 });
 
 test('returns a deterministic conflict when an existing batch body changes', async (t) => {
@@ -643,7 +644,7 @@ test('returns a deterministic conflict when an existing batch body changes', asy
 
   assert.equal(first.status, 202);
   assert.equal(changed.status, 409);
-  assert.deepEqual(changed.body, { error: 'batch_uuid_conflict' });
+  assert.deepEqual(changed.body, { error_code: 'batch_uuid_conflict', error: 'batch_uuid_conflict' });
   assert.equal(dependencies.cola.leerCola().items.length, 1);
 });
 
@@ -654,7 +655,7 @@ test('accepts 30 explicit v2 groups without applying LIMITE_TANDA', async (t) =>
   const payload = crearPayloadV2({
     groups: groupIds.map((facebookGroupId, index) => crearGrupoV2(
       facebookGroupId,
-      `sha256:${index.toString(16).padStart(64, '0')}`,
+      crearIdempotencyKey(2212, facebookGroupId, 1),
     )),
   });
 
@@ -799,7 +800,7 @@ test('rejects v2 batches above the configured MAX_GROUPS_PER_BATCH', async (t) =
       crearPayloadV2({
         groups: groupIds.map((facebookGroupId, index) => crearGrupoV2(
           facebookGroupId,
-          `sha256:${index.toString(16).padStart(64, '0')}`,
+          crearIdempotencyKey(2212, String(800000000000000 + index), 1),
         )),
       }),
     );
@@ -839,6 +840,7 @@ test('rejects legacy explicit groups above the configured MAX_GROUPS_PER_BATCH',
 
     assert.equal(response.status, 400);
     assert.deepEqual(response.body, {
+      error_code: 'invalid_payload',
       error: 'invalid_payload',
       details: ['groups debe contener entre 1 y 2 grupos'],
     });
@@ -865,7 +867,7 @@ test('rejects an idempotency key reused by another batch without mutating the qu
 
   assert.equal(first.status, 202);
   assert.equal(conflict.status, 409);
-  assert.deepEqual(conflict.body, { error: 'idempotency_key_conflict' });
+  assert.deepEqual(conflict.body, { error_code: 'idempotency_key_conflict', error: 'idempotency_key_conflict' });
   assert.equal(JSON.stringify(dependencies.cola.leerCola()), queueAfterFirst);
 });
 
@@ -876,14 +878,20 @@ function crearPaginaValidacion(texts, actions) {
         first() {
           return {
             isVisible: async () => texts.some((value) => value.includes(text)),
+            click: async () => {},
           };
         },
       };
     },
+    locator: () => ({
+      first: () => ({
+        isVisible: async () => texts.some((value) => value.includes('Write something') || value.includes('Escribe algo')),
+      }),
+    }),
     goto: async (url) => actions.push(['goto', url]),
     keyboard: {
       insertText: async () => actions.push(['insertText']),
-      press: async (key) => actions.push(['press', key]),
+      press: async () => {},
     },
   };
 }
@@ -957,7 +965,7 @@ test('returns profile_busy while a worker owns the persistent profile', async (t
   });
 
   assert.equal(busyResponse.status, 409);
-  assert.deepEqual(busyResponse.body, { error: 'profile_busy' });
+  assert.deepEqual(busyResponse.body, { error_code: 'profile_busy', error: 'profile_busy' });
   assert.equal(launchCalls, 1);
 
   releaseLaunch();
@@ -982,7 +990,7 @@ test('rejects a mismatched ID and URL before opening the profile', async (t) => 
   });
 
   assert.equal(response.status, 400);
-  assert.deepEqual(response.body, { error: 'facebook_group_mismatch' });
+  assert.deepEqual(response.body, { error_code: 'facebook_group_mismatch', error: 'facebook_group_mismatch' });
   assert.equal(launchCalls, 0);
 });
 
@@ -1032,7 +1040,7 @@ test('requires HMAC before validating a group or opening the profile', async (t)
   });
 
   assert.equal(response.status, 401);
-  assert.deepEqual(response.body, { error: 'missing_signature' });
+  assert.deepEqual(response.body, { error_code: 'missing_signature', error: 'missing_signature' });
   assert.equal(launchCalls, 0);
 });
 
@@ -1163,7 +1171,7 @@ test('processes only the requested batch and persists publishing transitions bef
   dependencies.cola.encolarLote({
     batch: { batch_uuid: batchB, lead_id: 2213 },
     items: [{
-      ...crearGrupoV2(FIRST_GROUP_ID, `sha256:${'2'.repeat(64)}`),
+      ...crearGrupoV2(FIRST_GROUP_ID, crearIdempotencyKey(2213, FIRST_GROUP_ID, 1)),
       grupo: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
       campaign_revision: 1,
       copy: 'Copy de prueba del batch B',
@@ -1228,7 +1236,7 @@ test('stops the requested batch on session expiration without touching other ite
   dependencies.cola.encolarLote({
     batch: { batch_uuid: batchB, lead_id: 2213 },
     items: [{
-      ...crearGrupoV2(FIRST_GROUP_ID, `sha256:${'3'.repeat(64)}`),
+      ...crearGrupoV2(FIRST_GROUP_ID, crearIdempotencyKey(2213, FIRST_GROUP_ID, 1)),
       grupo: `https://www.facebook.com/groups/${FIRST_GROUP_ID}/`,
       campaign_revision: 1,
       copy: 'Copy B',
@@ -1303,4 +1311,115 @@ test('does not recover publishing items into queued state after a worker restart
 
   assert.deepEqual(result, { procesados: 0 });
   assert.equal(dependencies.cola.leerCola().items[0].estado, 'publishing');
+});
+
+
+test('returns error_code for an unsigned operational request', async (t) => {
+  const listener = await abrirServidor(t);
+  const response = await solicitar(listener.baseUrl, '/api/cola');
+
+  assert.equal(response.status, 401);
+  assert.equal(response.body.error_code, 'missing_signature');
+});
+
+test('accepts a vanity group ID through the complete v2 API contract', async (t) => {
+  const groupId = 'constructores.potosinos';
+  const dependencies = crearDependenciasV2(t, [groupId]);
+  const listener = await abrirServidor(t, dependencies);
+  const payload = crearPayloadV2({
+    groups: [{
+      facebook_group_id: groupId,
+      url: `https://www.facebook.com/groups/${groupId}/`,
+      idempotency_key: crearIdempotencyKey(2212, groupId, 1),
+    }],
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/sondeo/dispatch', payload);
+
+  assert.equal(response.status, 202);
+  assert.equal(response.body.items[0].facebook_group_id, groupId);
+});
+
+test('validates and persists a previously absent vanity group before Playwright validation', async (t) => {
+  const groupId = 'grupo-nuevo-leon';
+  const dependencies = crearDependenciasV2(t, []);
+  const actions = [];
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => ({
+      newPage: async () => ({
+        goto: async (url) => actions.push(['goto', url]),
+        getByText: (text) => ({
+          first: () => ({ isVisible: async () => ['You are a member', 'Write something'].some((value) => value.includes(text)) }),
+        }),
+        locator: () => ({ first: () => ({ isVisible: async () => false }) }),
+      }),
+      close: async () => {},
+    }),
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: groupId,
+    url: `https://www.facebook.com/groups/${groupId}/`,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(actions[0][1], `https://www.facebook.com/groups/${groupId}/`);
+  assert.equal(dependencies.catalogo.buscar(groupId).validation_state, 'warning');
+  assert.equal(dependencies.catalogo.buscar(groupId).name, undefined);
+});
+
+test('returns current aggregate state on a retry after cancellation', async (t) => {
+  const dependencies = crearDependenciasV2(t);
+  const listener = await abrirServidor(t, dependencies);
+  const payload = crearPayloadV2();
+  const first = await solicitarJsonFirmado(listener.baseUrl, '/api/sondeo/dispatch', payload);
+  const data = dependencies.cola.leerCola();
+  dependencies.cola.actualizarItem(data, data.items[0].id, 'cancelled');
+
+  const retry = await solicitarJsonFirmado(listener.baseUrl, '/api/sondeo/dispatch', payload);
+
+  assert.equal(first.status, 202);
+  assert.equal(retry.status, 202);
+  assert.equal(retry.body.state, 'cancelled');
+  assert.equal(retry.body.items[0].state, 'cancelled');
+});
+
+test('normalizes navigation failures, persists invalid runtime state, and returns controlled error', async (t) => {
+  const dependencies = crearDependenciasV2(t, []);
+  let closeCalls = 0;
+  const listener = await abrirServidor(t, {
+    ...dependencies,
+    launchPersistentContext: async () => ({
+      newPage: async () => ({ goto: async () => { throw new Error('net::ERR_CONNECTION_RESET'); } }),
+      close: async () => { closeCalls += 1; },
+    }),
+  });
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/groups/validate', {
+    facebook_group_id: 'navigation-failure',
+    url: 'https://www.facebook.com/groups/navigation-failure/',
+  });
+
+  assert.equal(response.status, 502);
+  assert.equal(response.body.error_code, 'validation_navigation_error');
+  assert.equal(dependencies.catalogo.buscar('navigation-failure').validation_state, 'invalid');
+  assert.equal(dependencies.catalogo.buscar('navigation-failure').warning, 'navigation_error');
+  assert.equal(closeCalls, 1);
+});
+
+
+test('rejects a non-canonical supplied key even when it has a valid SHA-256 shape', async (t) => {
+  const dependencies = crearDependenciasV2(t);
+  const listener = await abrirServidor(t, dependencies);
+  const payload = crearPayloadV2({ idempotency_key: undefined });
+  payload.groups = [{
+    ...crearGrupoV2(FIRST_GROUP_ID, `sha256:${'f'.repeat(64)}`),
+  }];
+
+  const response = await solicitarJsonFirmado(listener.baseUrl, '/api/sondeo/dispatch', payload);
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error_code, 'invalid_payload');
+  assert.equal(dependencies.cola.existeCola(), false);
 });
